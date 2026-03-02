@@ -39,6 +39,7 @@ class GenerationPhase(StrEnum):
     EVALUATING = "evaluating"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class MutationAction(StrEnum):
@@ -47,6 +48,17 @@ class MutationAction(StrEnum):
     ADD = "add"
     MODIFY = "modify"
     REMOVE = "remove"
+
+
+class ACResult(BaseModel, frozen=True):
+    """Result of evaluating a single acceptance criterion."""
+
+    ac_index: int
+    ac_content: str
+    passed: bool
+    score: float | None = None
+    evidence: str = ""
+    verification_method: str = "unknown"
 
 
 class EvaluationSummary(BaseModel, frozen=True):
@@ -61,6 +73,7 @@ class EvaluationSummary(BaseModel, frozen=True):
     score: float | None = None
     drift_score: float | None = None
     failure_reason: str | None = None
+    ac_results: tuple[ACResult, ...] = ()
 
 
 class FieldModification(BaseModel, frozen=True):

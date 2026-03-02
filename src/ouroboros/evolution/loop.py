@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 import json
 import logging
+import os
 from typing import Any
 
 from ouroboros.core.errors import OuroborosError
@@ -58,10 +59,12 @@ class EvolutionaryLoopConfig:
     max_generations: int = 30
     convergence_threshold: float = 0.95
     stagnation_window: int = 3
-    min_generations: int = 2
-    generation_timeout_seconds: int = 7200
+    min_generations: int = 3
+    generation_timeout_seconds: int = int(
+        os.environ.get("OUROBOROS_GENERATION_TIMEOUT", "0")
+    )  # 0 = no timeout
     enable_oscillation_detection: bool = True
-    eval_gate_enabled: bool = False
+    eval_gate_enabled: bool = True
     eval_min_score: float = 0.7
 
 
@@ -202,6 +205,7 @@ class EvolutionaryLoop:
             )
 
             # Run generation with timeout
+            loop_timeout = self.config.generation_timeout_seconds or None
             try:
                 gen_result = await asyncio.wait_for(
                     self._run_generation(
@@ -209,7 +213,7 @@ class EvolutionaryLoop:
                         generation_number=generation_number,
                         current_seed=current_seed,
                     ),
-                    timeout=self.config.generation_timeout_seconds,
+                    timeout=loop_timeout,
                 )
             except TimeoutError:
                 logger.error(
@@ -425,7 +429,18 @@ class EvolutionaryLoop:
                 # Caller provided seed explicitly (e.g., after rewind)
                 current_seed = initial_seed
             elif lineage.generations:
-                last_completed = lineage.generations[-1]
+                last_completed = next(
+                    (
+                        g
+                        for g in reversed(lineage.generations)
+                        if g.phase == GenerationPhase.COMPLETED
+                    ),
+                    None,
+                )
+                if last_completed is None:
+                    return Result.err(
+                        OuroborosError("Events exist but no completed generations found")
+                    )
                 if last_completed.seed_json:
                     try:
                         current_seed = Seed.from_dict(json.loads(last_completed.seed_json))
@@ -444,6 +459,7 @@ class EvolutionaryLoop:
                 return Result.err(OuroborosError("Events exist but no completed generations found"))
 
         # Step 2: Run one generation
+        timeout = self.config.generation_timeout_seconds or None  # 0 = no timeout
         try:
             gen_result = await asyncio.wait_for(
                 self._run_generation(
@@ -453,17 +469,13 @@ class EvolutionaryLoop:
                     execute=execute,
                     parallel=parallel,
                 ),
-                timeout=self.config.generation_timeout_seconds,
+                timeout=timeout,
             )
         except TimeoutError:
-            await self.event_store.append(
-                lineage_generation_failed(
-                    lineage.lineage_id,
-                    generation_number,
-                    "executing",
-                    f"Generation timed out after {self.config.generation_timeout_seconds}s",
-                )
-            )
+            # Note: _run_generation's CancelledError handler already emits
+            # generation.failed (asyncio.wait_for cancels the task before
+            # raising TimeoutError). No duplicate event emission needed here.
+
             # Return FAILED step result
             failed_gen = GenerationResult(
                 generation_number=generation_number,
@@ -473,7 +485,7 @@ class EvolutionaryLoop:
             )
             signal = ConvergenceSignal(
                 converged=False,
-                reason="Generation timed out",
+                reason=f"Generation timed out after {self.config.generation_timeout_seconds}s",
                 ontology_similarity=0.0,
                 generation=generation_number,
             )
@@ -488,6 +500,16 @@ class EvolutionaryLoop:
             )
 
         if gen_result.is_err:
+            # Emit generation.failed event so the event store reflects the failure.
+            # Without this, only generation.started is recorded, leaving an orphan.
+            await self.event_store.append(
+                lineage_generation_failed(
+                    lineage.lineage_id,
+                    generation_number,
+                    "executing",
+                    str(gen_result.error),
+                )
+            )
             failed_gen = GenerationResult(
                 generation_number=generation_number,
                 seed=current_seed,
@@ -615,6 +637,50 @@ class EvolutionaryLoop:
 
         Gen 1: Execute → Evaluate (seed already provided)
         Gen 2+: Wonder → Reflect → Seed → Execute → Evaluate
+        """
+        try:
+            return await self._run_generation_phases(
+                lineage=lineage,
+                generation_number=generation_number,
+                current_seed=current_seed,
+                execute=execute,
+                parallel=parallel,
+            )
+        except asyncio.CancelledError:
+            # MCP transport disconnect or task cancellation after generation.started
+            # was emitted. Emit generation.failed so we don't leave orphaned events.
+            logger.warning(
+                "evolution.generation.cancelled",
+                extra={
+                    "lineage_id": lineage.lineage_id,
+                    "generation": generation_number,
+                },
+            )
+            try:
+                await self.event_store.append(
+                    lineage_generation_failed(
+                        lineage.lineage_id,
+                        generation_number,
+                        "cancelled",
+                        "Generation cancelled (MCP transport disconnect or task cancellation)",
+                    )
+                )
+            except Exception:
+                pass  # Best-effort: event store may also be shutting down
+            raise
+
+    async def _run_generation_phases(
+        self,
+        lineage: OntologyLineage,
+        generation_number: int,
+        current_seed: Seed,
+        execute: bool = True,
+        parallel: bool = True,
+    ) -> Result[GenerationResult, OuroborosError]:
+        """Inner implementation of _run_generation with all phase logic.
+
+        Separated from _run_generation to allow CancelledError guard at the
+        outer level without deeply nesting the entire method body.
         """
         wonder_output: WonderOutput | None = None
         reflect_output: ReflectOutput | None = None
@@ -745,6 +811,14 @@ class EvolutionaryLoop:
                         },
                     )
                 elif hasattr(exec_result, "is_ok"):
+                    await self.event_store.append(
+                        lineage_generation_failed(
+                            lineage.lineage_id,
+                            generation_number,
+                            GenerationPhase.EXECUTING.value,
+                            str(exec_result.error),
+                        )
+                    )
                     return Result.err(OuroborosError(f"Execution failed: {exec_result.error}"))
                 else:
                     execution_output = str(exec_result)

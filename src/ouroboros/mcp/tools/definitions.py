@@ -13,6 +13,7 @@ via the MCP server:
 """
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Any
 
@@ -950,6 +951,26 @@ class InterviewHandler:
     """
 
     interview_engine: InterviewEngine | None = field(default=None, repr=False)
+    event_store: EventStore | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize event store."""
+        self._event_store = self.event_store or EventStore()
+        self._initialized = False
+
+    async def _ensure_initialized(self) -> None:
+        """Ensure the event store is initialized."""
+        if not self._initialized:
+            await self._event_store.initialize()
+            self._initialized = True
+
+    async def _emit_event(self, event: Any) -> None:
+        """Emit event to store. Swallows errors to not break interview flow."""
+        try:
+            await self._ensure_initialized()
+            await self._event_store.append(event)
+        except Exception as e:
+            log.warning("mcp.tool.interview.event_emission_failed", error=str(e))
 
     @property
     def definition(self) -> MCPToolDefinition:
@@ -1005,6 +1026,8 @@ class InterviewHandler:
             state_dir=Path.home() / ".ouroboros" / "data",
         )
 
+        _interview_id: str | None = None  # Track for error event emission
+
         try:
             # Start new interview
             if initial_context:
@@ -1018,14 +1041,38 @@ class InterviewHandler:
                     )
 
                 state = result.value
+                _interview_id = state.interview_id
                 question_result = await engine.ask_next_question(state)
                 if question_result.is_err:
-                    return Result.err(
-                        MCPToolError(
-                            str(question_result.error),
-                            tool_name="ouroboros_interview",
+                    error_msg = str(question_result.error)
+                    from ouroboros.events.interview import interview_failed
+
+                    await self._emit_event(
+                        interview_failed(
+                            state.interview_id,
+                            error_msg,
+                            phase="question_generation",
                         )
                     )
+                    # Return recoverable result with session ID for retry
+                    if "empty response" in error_msg.lower():
+                        return Result.ok(
+                            MCPToolResult(
+                                content=(
+                                    MCPContentItem(
+                                        type=ContentType.TEXT,
+                                        text=(
+                                            f"Interview started but question generation failed after retries. "
+                                            f"Session ID: {state.interview_id}\n\n"
+                                            f'Resume with: session_id="{state.interview_id}"'
+                                        ),
+                                    ),
+                                ),
+                                is_error=True,
+                                meta={"session_id": state.interview_id, "recoverable": True},
+                            )
+                        )
+                    return Result.err(MCPToolError(error_msg, tool_name="ouroboros_interview"))
 
                 question = question_result.value
 
@@ -1048,6 +1095,16 @@ class InterviewHandler:
                         "mcp.tool.interview.save_failed_on_start",
                         error=str(save_result.error),
                     )
+
+                # Emit interview started event
+                from ouroboros.events.interview import interview_started
+
+                await self._emit_event(
+                    interview_started(
+                        state.interview_id,
+                        initial_context,
+                    )
+                )
 
                 log.info(
                     "mcp.tool.interview.started",
@@ -1079,6 +1136,7 @@ class InterviewHandler:
                     )
 
                 state = load_result.value
+                _interview_id = session_id
 
                 # If answer provided, record it first
                 if answer:
@@ -1107,6 +1165,18 @@ class InterviewHandler:
                         )
                     state = record_result.value
 
+                    # Emit response recorded event
+                    from ouroboros.events.interview import interview_response_recorded
+
+                    await self._emit_event(
+                        interview_response_recorded(
+                            interview_id=session_id,
+                            round_number=len(state.rounds),
+                            question_preview=last_question,
+                            response_preview=answer,
+                        )
+                    )
+
                     log.info(
                         "mcp.tool.interview.response_recorded",
                         session_id=session_id,
@@ -1115,12 +1185,34 @@ class InterviewHandler:
                 # Generate next question (whether resuming or after recording answer)
                 question_result = await engine.ask_next_question(state)
                 if question_result.is_err:
-                    return Result.err(
-                        MCPToolError(
-                            str(question_result.error),
-                            tool_name="ouroboros_interview",
+                    error_msg = str(question_result.error)
+                    from ouroboros.events.interview import interview_failed
+
+                    await self._emit_event(
+                        interview_failed(
+                            session_id,
+                            error_msg,
+                            phase="question_generation",
                         )
                     )
+                    if "empty response" in error_msg.lower():
+                        return Result.ok(
+                            MCPToolResult(
+                                content=(
+                                    MCPContentItem(
+                                        type=ContentType.TEXT,
+                                        text=(
+                                            f"Question generation failed after retries. "
+                                            f"Session ID: {session_id}\n\n"
+                                            f'Resume with: session_id="{session_id}"'
+                                        ),
+                                    ),
+                                ),
+                                is_error=True,
+                                meta={"session_id": session_id, "recoverable": True},
+                            )
+                        )
+                    return Result.err(MCPToolError(error_msg, tool_name="ouroboros_interview"))
 
                 question = question_result.value
 
@@ -1171,6 +1263,16 @@ class InterviewHandler:
 
         except Exception as e:
             log.error("mcp.tool.interview.error", error=str(e))
+            if _interview_id:
+                from ouroboros.events.interview import interview_failed
+
+                await self._emit_event(
+                    interview_failed(
+                        _interview_id,
+                        str(e),
+                        phase="unexpected_error",
+                    )
+                )
             return Result.err(
                 MCPToolError(
                     f"Interview failed: {e}",
@@ -1645,7 +1747,9 @@ class EvolveStepHandler:
 
     evolutionary_loop: Any | None = field(default=None, repr=False)
 
-    TIMEOUT_SECONDS: int = 7200  # Override MCP adapter's default 30s
+    TIMEOUT_SECONDS: int = int(
+        os.environ.get("OUROBOROS_GENERATION_TIMEOUT", "7200")
+    )  # Override MCP adapter's default 30s
 
     @property
     def definition(self) -> MCPToolDefinition:
@@ -1776,6 +1880,11 @@ class EvolveStepHandler:
             f"**Phase**: {gen.phase.value}",
             f"**Convergence similarity**: {sig.ontology_similarity:.2%}",
             f"**Reason**: {sig.reason}",
+            *(
+                [f"**Failed ACs**: {', '.join(str(i + 1) for i in sig.failed_acs)}"]
+                if sig.failed_acs
+                else []
+            ),
             f"**Lineage**: {step.lineage.lineage_id} ({step.lineage.current_generation} generations)",
             f"**Next generation**: {step.next_generation}",
         ]
@@ -1795,6 +1904,12 @@ class EvolveStepHandler:
             text_lines.append(f"- **Drift**: {es.drift_score}")
             if es.failure_reason:
                 text_lines.append(f"- **Failure**: {es.failure_reason}")
+            if es.ac_results:
+                text_lines.append("")
+                text_lines.append("#### Per-AC Results")
+                for ac in es.ac_results:
+                    status = "PASS" if ac.passed else "FAIL"
+                    text_lines.append(f"- AC {ac.ac_index + 1}: [{status}] {ac.ac_content[:80]}")
 
         if gen.wonder_output:
             text_lines.append("")
@@ -2131,6 +2246,141 @@ class LineageStatusHandler:
                     "status": lineage.status.value,
                     "generations": lineage.current_generation,
                     "goal": lineage.goal,
+                },
+            )
+        )
+
+
+@dataclass
+class ACDashboardHandler:
+    """Handler for the ouroboros_ac_dashboard tool.
+
+    Displays per-AC pass/fail visibility across generations
+    with three display modes: summary, full, ac.
+    """
+
+    event_store: EventStore | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize event store."""
+        self._event_store = self.event_store or EventStore()
+        self._initialized = False
+
+    async def _ensure_initialized(self) -> None:
+        """Ensure the event store is initialized."""
+        if not self._initialized:
+            await self._event_store.initialize()
+            self._initialized = True
+
+    @property
+    def definition(self) -> MCPToolDefinition:
+        """Return the tool definition."""
+        return MCPToolDefinition(
+            name="ouroboros_ac_dashboard",
+            description=(
+                "Display per-AC pass/fail compliance dashboard across generations. "
+                "Shows which acceptance criteria passed, failed, or are flaky. "
+                "Modes: 'summary' (default), 'full' (AC x Gen matrix), 'ac' (single AC history)."
+            ),
+            parameters=(
+                MCPToolParameter(
+                    name="lineage_id",
+                    type=ToolInputType.STRING,
+                    description="ID of the lineage to display",
+                    required=True,
+                ),
+                MCPToolParameter(
+                    name="mode",
+                    type=ToolInputType.STRING,
+                    description="Display mode: 'summary' (default), 'full', or 'ac'",
+                    required=False,
+                ),
+                MCPToolParameter(
+                    name="ac_index",
+                    type=ToolInputType.INTEGER,
+                    description="AC index (1-based) for 'ac' mode. Required when mode='ac'.",
+                    required=False,
+                ),
+            ),
+        )
+
+    async def handle(
+        self,
+        arguments: dict[str, Any],
+    ) -> Result[MCPToolResult, MCPServerError]:
+        """Handle a dashboard request."""
+        lineage_id = arguments.get("lineage_id")
+        if not lineage_id:
+            return Result.err(
+                MCPToolError(
+                    "lineage_id is required",
+                    tool_name="ouroboros_ac_dashboard",
+                )
+            )
+
+        mode = arguments.get("mode", "summary")
+        ac_index = arguments.get("ac_index")
+
+        await self._ensure_initialized()
+
+        try:
+            events = await self._event_store.replay_lineage(lineage_id)
+        except Exception as e:
+            return Result.err(
+                MCPToolError(
+                    f"Failed to query events: {e}",
+                    tool_name="ouroboros_ac_dashboard",
+                )
+            )
+
+        if not events:
+            return Result.err(
+                MCPToolError(
+                    f"No lineage found with ID: {lineage_id}",
+                    tool_name="ouroboros_ac_dashboard",
+                )
+            )
+
+        from ouroboros.evolution.projector import LineageProjector
+        from ouroboros.mcp.tools.dashboard import (
+            format_full,
+            format_single_ac,
+            format_summary,
+        )
+
+        projector = LineageProjector()
+        lineage = projector.project(events)
+
+        if lineage is None:
+            return Result.err(
+                MCPToolError(
+                    f"Failed to project lineage: {lineage_id}",
+                    tool_name="ouroboros_ac_dashboard",
+                )
+            )
+
+        if mode == "full":
+            text = format_full(lineage)
+        elif mode == "ac":
+            if ac_index is None:
+                return Result.err(
+                    MCPToolError(
+                        "ac_index is required for mode='ac'",
+                        tool_name="ouroboros_ac_dashboard",
+                    )
+                )
+            text = format_single_ac(lineage, int(ac_index) - 1)  # Convert to 0-based
+        else:
+            text = format_summary(lineage)
+
+        return Result.ok(
+            MCPToolResult(
+                content=(MCPContentItem(type=ContentType.TEXT, text=text),),
+                is_error=False,
+                meta={
+                    "lineage_id": lineage.lineage_id,
+                    "mode": mode,
+                    "generations": lineage.current_generation,
                 },
             )
         )

@@ -486,6 +486,7 @@ def create_ouroboros_server(
         PipelineConfig,
     )
     from ouroboros.mcp.tools.definitions import (
+        ACDashboardHandler,
         EvaluateHandler,
         EvolveRewindHandler,
         EvolveStepHandler,
@@ -529,13 +530,24 @@ def create_ouroboros_server(
     seed_generator = SeedGenerator(llm_adapter=llm_adapter)
 
     # Create evolution engines for evolve_step
-    from ouroboros.core.lineage import EvaluationSummary
+    from ouroboros.core.lineage import ACResult, EvaluationSummary
+    from ouroboros.evaluation.artifact_collector import ArtifactCollector
     from ouroboros.evolution.loop import EvolutionaryLoop, EvolutionaryLoopConfig
     from ouroboros.evolution.reflect import ReflectEngine
     from ouroboros.evolution.wonder import WonderEngine
+    from ouroboros.verification.extractor import AssertionExtractor
+    from ouroboros.verification.verifier import SpecVerifier
 
-    wonder_engine = WonderEngine(llm_adapter=llm_adapter, model="default")
-    reflect_engine = ReflectEngine(llm_adapter=llm_adapter, model="default")
+    wonder_model = os.environ.get("OUROBOROS_WONDER_MODEL")  # None → use engine's fallback
+    reflect_model = os.environ.get("OUROBOROS_REFLECT_MODEL")  # None → use engine's fallback
+    wonder_engine = WonderEngine(
+        llm_adapter=llm_adapter,
+        **({"model": wonder_model} if wonder_model else {}),
+    )
+    reflect_engine = ReflectEngine(
+        llm_adapter=llm_adapter,
+        **({"model": reflect_model} if reflect_model else {}),
+    )
 
     # Wire real execution/evaluation callables for evolve_step so that
     # generation quality is validated, not only ontology deltas.
@@ -597,23 +609,39 @@ def create_ouroboros_server(
         """
         import re
 
-        matches = re.findall(r"### AC \d+: \[(PASS|FAIL)\]", artifact)
-        if not matches:
+        # Match full AC lines: "### AC 3: [PASS] Some description..."
+        ac_line_matches = re.findall(r"### AC (\d+): \[(PASS|FAIL)\]\s*(.*)", artifact)
+        if not ac_line_matches:
             return None
 
-        total = len(matches)
-        passed = sum(1 for m in matches if m == "PASS")
+        seed_acs = getattr(seed, "acceptance_criteria", None) or ()
+
+        ac_results: list[ACResult] = []
+        for ac_num_str, status, description in ac_line_matches:
+            ac_idx = int(ac_num_str) - 1  # 0-based index
+            ac_content = seed_acs[ac_idx] if ac_idx < len(seed_acs) else description.strip()
+            ac_results.append(
+                ACResult(
+                    ac_index=ac_idx,
+                    ac_content=ac_content,
+                    passed=status == "PASS",
+                    score=1.0 if status == "PASS" else 0.0,
+                    evidence=description.strip(),
+                    verification_method="mechanical",
+                )
+            )
+
+        total = len(ac_results)
+        passed = sum(1 for r in ac_results if r.passed)
         score = passed / total if total > 0 else 0.0
 
-        total_acs = (
-            len(seed.acceptance_criteria) if getattr(seed, "acceptance_criteria", None) else total
-        )
+        total_acs = len(seed_acs) if seed_acs else total
         approved = passed >= total_acs and passed == total
 
         failure_reason = None
         if not approved:
-            failed_count = total - passed
-            failure_reason = f"{failed_count}/{total} ACs failed"
+            failed_indices = [r.ac_index + 1 for r in ac_results if not r.passed]
+            failure_reason = f"{len(failed_indices)}/{total} ACs failed (AC {', '.join(str(i) for i in failed_indices)})"
 
         return EvaluationSummary(
             final_approved=approved,
@@ -621,6 +649,130 @@ def create_ouroboros_server(
             score=score,
             drift_score=1.0 - score,
             failure_reason=failure_reason,
+            ac_results=tuple(ac_results),
+        )
+
+    spec_extractor = AssertionExtractor(llm_adapter=llm_adapter)
+
+    def _extract_project_dir(artifact: str) -> str | None:
+        """Extract project directory from execution output.
+
+        Looks for Write/Edit file paths and walks up to find project root.
+        """
+        from pathlib import Path
+        import re
+
+        write_matches = re.findall(r"(?:Write|Edit): (/[^\s]+)", artifact)
+        if not write_matches:
+            return None
+
+        for path_str in write_matches:
+            candidate = Path(path_str).parent
+            for _ in range(10):
+                if (candidate / "pyproject.toml").exists() or (candidate / "setup.py").exists():
+                    return str(candidate)
+                if candidate == candidate.parent:
+                    break
+                candidate = candidate.parent
+
+        return None
+
+    async def _verify_spec_compliance(
+        seed: Any,
+        artifact: str,
+        mechanical: EvaluationSummary,
+    ) -> EvaluationSummary | None:
+        """Run spec verification and override mechanical results if discrepancies found.
+
+        Returns a corrected EvaluationSummary if discrepancies are detected,
+        or None if no override is needed (verification passed or unavailable).
+        """
+        project_dir = _extract_project_dir(artifact)
+        if not project_dir:
+            return None
+
+        seed_acs = getattr(seed, "acceptance_criteria", None) or ()
+        if not seed_acs:
+            return None
+
+        seed_id = getattr(getattr(seed, "metadata", None), "seed_id", None)
+        if not seed_id:
+            return None
+
+        # Extract assertions from ACs (cached by seed_id)
+        extract_result = await spec_extractor.extract(seed_id, seed_acs)
+        if extract_result.is_err:
+            log.warning("spec_verification.extraction_failed", error=str(extract_result.error))
+            return None
+
+        assertions = extract_result.value
+        if not assertions:
+            return None
+
+        # Build agent results map from mechanical evaluation
+        agent_results = {ac.ac_index: ac.passed for ac in mechanical.ac_results}
+
+        # Run verification
+        verifier = SpecVerifier(project_dir=project_dir)
+        summary = verifier.verify_all(assertions, agent_results)
+
+        if not summary.has_discrepancies:
+            return None
+
+        # Override: rebuild ac_results with verification corrections
+        log.warning(
+            "spec_verification.discrepancies_found",
+            count=summary.discrepancy_count,
+            project_dir=project_dir,
+        )
+
+        corrected_results: list[ACResult] = []
+        discrepant_indices: set[int] = set()
+        for report in summary.reports:
+            if report.has_discrepancy:
+                discrepant_indices.add(report.ac_index)
+
+        for ac in mechanical.ac_results:
+            if ac.ac_index in discrepant_indices:
+                # Find the verification detail for evidence
+                detail = ""
+                for report in summary.reports:
+                    if report.ac_index == ac.ac_index:
+                        details = [r.detail for r in report.results if r.discrepancy]
+                        detail = "; ".join(details)
+                        break
+
+                corrected_results.append(
+                    ACResult(
+                        ac_index=ac.ac_index,
+                        ac_content=ac.ac_content,
+                        passed=False,
+                        score=0.0,
+                        evidence=f"Spec verification override: {detail}",
+                        verification_method="spec_verifier",
+                    )
+                )
+            else:
+                corrected_results.append(ac)
+
+        total = len(corrected_results)
+        passed = sum(1 for r in corrected_results if r.passed)
+        score = passed / total if total > 0 else 0.0
+
+        failed_indices = [r.ac_index + 1 for r in corrected_results if not r.passed]
+        failure_reason = (
+            f"{len(failed_indices)}/{total} ACs failed "
+            f"(AC {', '.join(str(i) for i in failed_indices)}) "
+            f"[{summary.discrepancy_count} spec verification override(s)]"
+        )
+
+        return EvaluationSummary(
+            final_approved=False,
+            highest_stage_passed=2,
+            score=score,
+            drift_score=1.0 - score,
+            failure_reason=failure_reason,
+            ac_results=tuple(corrected_results),
         )
 
     async def _evolution_evaluator(seed: Any, execution_output: str | None) -> EvaluationSummary:
@@ -640,14 +792,23 @@ def create_ouroboros_server(
         # More reliable than LLM-based evaluation in MCP stdio mode.
         mechanical = _evaluate_mechanically(artifact, seed)
         if mechanical is not None:
+            # Run spec verification to catch agent self-report lies
+            verified = await _verify_spec_compliance(seed, artifact, mechanical)
+            if verified is not None:
+                return verified
             return mechanical
 
         # Fallback: LLM-based evaluation when no structured AC results
-        current_ac = (
-            seed.acceptance_criteria[0]
-            if getattr(seed, "acceptance_criteria", None)
-            else "Verify execution output meets requirements"
-        )
+        acs = getattr(seed, "acceptance_criteria", None)
+        if acs:
+            current_ac = "\n".join(f"AC {i + 1}: {ac}" for i, ac in enumerate(acs))
+        else:
+            current_ac = "Verify execution output meets requirements"
+
+        # Collect file-based artifacts for richer evaluation
+        project_dir = _extract_project_dir(artifact)
+        artifact_bundle = ArtifactCollector().collect(artifact, project_dir)
+
         eval_context = EvaluationContext(
             execution_id=f"eval_{seed.metadata.seed_id}",
             seed_id=seed.metadata.seed_id,
@@ -656,6 +817,7 @@ def create_ouroboros_server(
             artifact_type="code",
             goal=seed.goal,
             constraints=tuple(seed.constraints),
+            artifact_bundle=artifact_bundle,
         )
 
         eval_result = await evolution_eval_pipeline.evaluate(eval_context)
@@ -828,6 +990,7 @@ def create_ouroboros_server(
         ),
         InterviewHandler(
             interview_engine=interview_engine,
+            event_store=event_store,
         ),
         EvaluateHandler(
             event_store=event_store,
@@ -842,6 +1005,9 @@ def create_ouroboros_server(
         ),
         EvolveRewindHandler(
             evolutionary_loop=evolutionary_loop,
+        ),
+        ACDashboardHandler(
+            event_store=event_store,
         ),
     ]
 

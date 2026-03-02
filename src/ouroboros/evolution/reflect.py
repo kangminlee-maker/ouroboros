@@ -23,6 +23,7 @@ from ouroboros.core.lineage import EvaluationSummary, MutationAction, OntologyLi
 from ouroboros.core.seed import Seed
 from ouroboros.core.text import truncate_head_tail
 from ouroboros.core.types import Result
+from ouroboros.evolution.regression import RegressionDetector
 from ouroboros.evolution.wonder import WonderOutput
 from ouroboros.providers.base import (
     CompletionConfig,
@@ -122,7 +123,16 @@ class ReflectEngine:
             logger.error("ReflectEngine LLM call failed: %s", result.error)
             return Result.err(result.error)
 
-        return Result.ok(self._parse_response(result.value.content, current_seed))
+        raw_content = result.value.content
+        logger.info(
+            "reflect.raw_response",
+            extra={
+                "content_length": len(raw_content),
+                "content_preview": raw_content[:500],
+            },
+        )
+
+        return Result.ok(self._parse_response(raw_content, current_seed))
 
     def _system_prompt(self) -> str:
         return """You are the Reflect Engine of Ouroboros, an evolutionary development system.
@@ -177,6 +187,30 @@ Guidelines:
         parts.append(f"  Drift: {eval_summary.drift_score}")
         if eval_summary.failure_reason:
             parts.append(f"  Failure: {eval_summary.failure_reason}")
+        if eval_summary.ac_results:
+            parts.append("\n  Per-AC Breakdown:")
+            for ac in eval_summary.ac_results:
+                status = "PASS" if ac.passed else "FAIL"
+                parts.append(f"    AC {ac.ac_index + 1} [{status}]: {ac.ac_content}")
+            failed_acs = [ac for ac in eval_summary.ac_results if not ac.passed]
+            if failed_acs:
+                parts.append(
+                    f"\n  PRIORITY: Fix {len(failed_acs)} failing AC(s) while preserving passing ones."
+                )
+
+        # Regression context
+        if lineage and len(lineage.generations) >= 2:
+            report = RegressionDetector().detect(lineage)
+            if report.has_regressions:
+                parts.append(f"\n## REGRESSIONS ({len(report.regressions)})")
+                for reg in report.regressions:
+                    parts.append(
+                        f"  - AC {reg.ac_index + 1} (Gen {reg.passed_in_generation}→Gen {reg.failed_in_generation}): "
+                        f"{reg.ac_text}"
+                    )
+                parts.append(
+                    "  CRITICAL: These ACs previously passed. Preserve their behavior while fixing other issues."
+                )
 
         parts.append("\n## Wonder Questions (what we still don't know)")
         for q in wonder.questions:
@@ -244,7 +278,13 @@ Guidelines:
                 reasoning=data.get("reasoning", ""),
             )
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.warning("Failed to parse ReflectEngine response: %s", e)
+            logger.warning(
+                "reflect.parse_failed",
+                extra={
+                    "error": str(e),
+                    "raw_content": content[:1000],
+                },
+            )
             # Return current seed values with no mutations (safe fallback)
             return ReflectOutput(
                 refined_goal=current_seed.goal,
