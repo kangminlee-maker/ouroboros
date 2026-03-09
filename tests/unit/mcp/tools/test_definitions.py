@@ -1,5 +1,6 @@
 """Tests for Ouroboros tool definitions."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from ouroboros.mcp.tools.definitions import (
@@ -458,6 +459,119 @@ class TestEvaluateHandler:
 
         assert result.is_ok
         assert "Evaluation Results" in result.value.text_content
+
+
+class TestEvaluateHandlerCodeChanges:
+    """Tests for code-change detection and contextual Stage 1 output."""
+
+    def _make_handler(self):
+        return EvaluateHandler()
+
+    def _make_stage1(self, *, passed: bool):
+        from ouroboros.evaluation.models import CheckResult, CheckType, MechanicalResult
+
+        check = CheckResult(
+            check_type=CheckType.TEST,
+            passed=passed,
+            message="tests passed" if passed else "tests failed",
+        )
+        return MechanicalResult(passed=passed, checks=(check,), coverage_score=None)
+
+    def _make_eval_result(self, *, stage1_passed: bool, final_approved: bool):
+        from ouroboros.evaluation.models import EvaluationResult
+
+        return EvaluationResult(
+            execution_id="test-session",
+            stage1_result=self._make_stage1(passed=stage1_passed),
+            stage2_result=None,
+            stage3_result=None,
+            final_approved=final_approved,
+        )
+
+    def test_format_result_stage1_fail_with_code_changes(self) -> None:
+        """Stage 1 failure + code changes shows real-failure warning."""
+        handler = self._make_handler()
+        result = self._make_eval_result(stage1_passed=False, final_approved=False)
+        text = handler._format_evaluation_result(result, code_changes=True)
+
+        assert "real build/test failures" in text
+        assert "No code changes detected" not in text
+
+    def test_format_result_stage1_fail_no_code_changes(self) -> None:
+        """Stage 1 failure + no code changes shows dry-check note."""
+        handler = self._make_handler()
+        result = self._make_eval_result(stage1_passed=False, final_approved=False)
+        text = handler._format_evaluation_result(result, code_changes=False)
+
+        assert "No code changes detected" in text
+        assert "ooo run" in text
+        assert "real build/test failures" not in text
+
+    def test_format_result_stage1_fail_detection_none(self) -> None:
+        """Stage 1 failure + None detection leaves output unchanged."""
+        handler = self._make_handler()
+        result = self._make_eval_result(stage1_passed=False, final_approved=False)
+        text = handler._format_evaluation_result(result, code_changes=None)
+
+        assert "real build/test failures" not in text
+        assert "No code changes detected" not in text
+
+    def test_format_result_stage1_pass_no_annotation(self) -> None:
+        """Passing Stage 1 never shows annotation regardless of code_changes."""
+        handler = self._make_handler()
+        result = self._make_eval_result(stage1_passed=True, final_approved=True)
+        text = handler._format_evaluation_result(result, code_changes=True)
+
+        assert "real build/test failures" not in text
+        assert "No code changes detected" not in text
+
+    async def test_has_code_changes_true(self) -> None:
+        """_has_code_changes returns True when git reports modifications."""
+        handler = self._make_handler()
+        from ouroboros.evaluation.mechanical import CommandResult
+
+        mock_result = CommandResult(return_code=0, stdout=" M src/main.py\n", stderr="")
+        with patch(
+            "ouroboros.evaluation.mechanical.run_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ) as mock_run:
+            result = await handler._has_code_changes(Path("/fake"))
+
+        assert result is True
+        mock_run.assert_awaited_once()
+
+    async def test_has_code_changes_false(self) -> None:
+        """_has_code_changes returns False for a clean working tree."""
+        handler = self._make_handler()
+        from ouroboros.evaluation.mechanical import CommandResult
+
+        mock_result = CommandResult(return_code=0, stdout="", stderr="")
+        with patch(
+            "ouroboros.evaluation.mechanical.run_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await handler._has_code_changes(Path("/fake"))
+
+        assert result is False
+
+    async def test_has_code_changes_not_git_repo(self) -> None:
+        """_has_code_changes returns None when git fails (not a repo)."""
+        handler = self._make_handler()
+        from ouroboros.evaluation.mechanical import CommandResult
+
+        mock_result = CommandResult(
+            return_code=128, stdout="", stderr="fatal: not a git repository"
+        )
+        with patch(
+            "ouroboros.evaluation.mechanical.run_command",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await handler._has_code_changes(Path("/fake"))
+
+        assert result is None
 
 
 class TestInterviewHandlerCwd:

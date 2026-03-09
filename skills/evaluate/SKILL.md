@@ -67,7 +67,8 @@ When the user invokes this skill:
    - Suggest fixes if evaluation fails
    - Always end with a 📍 suggestion based on the outcome:
      - **APPROVED**: `📍 Done! Your implementation passes all checks. Optional: ooo evolve to iteratively refine`
-     - **REJECTED at Stage 1** (mechanical): `📍 Next: Fix the build/test failures above, then ooo evaluate — or ooo ralph for automated fix loop`
+     - **REJECTED at Stage 1** (mechanical, `code_changes_detected: true`): `📍 Next: Fix the build/test failures above, then ooo evaluate — or ooo ralph for automated fix loop`
+     - **REJECTED at Stage 1** (mechanical, `code_changes_detected: false`): `📍 Next: Run ooo run first to produce code, then ooo evaluate`
      - **REJECTED at Stage 2** (semantic): `📍 Next: ooo run to re-execute with fixes — or ooo evolve for iterative refinement`
      - **REJECTED at Stage 3** (consensus): `📍 Next: ooo interview to re-examine requirements — or ooo unstuck to challenge assumptions`
 

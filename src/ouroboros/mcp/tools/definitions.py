@@ -1523,8 +1523,15 @@ class EvaluateHandler:
 
             eval_result = result.value
 
+            # Detect code changes when Stage 1 fails (presentation concern)
+            code_changes: bool | None = None
+            if eval_result.stage1_result and not eval_result.stage1_result.passed:
+                code_changes = await self._has_code_changes(working_dir)
+
             # Build result text
-            result_text = self._format_evaluation_result(eval_result)
+            result_text = self._format_evaluation_result(
+                eval_result, code_changes=code_changes
+            )
 
             # Build metadata
             meta = {
@@ -1543,6 +1550,7 @@ class EvaluateHandler:
                 "stage3_approved": eval_result.stage3_result.approved
                 if eval_result.stage3_result
                 else None,
+                "code_changes_detected": code_changes,
             }
 
             return Result.ok(
@@ -1561,11 +1569,37 @@ class EvaluateHandler:
                 )
             )
 
-    def _format_evaluation_result(self, result) -> str:
+    async def _has_code_changes(self, working_dir: Path) -> bool | None:
+        """Detect whether the working tree has code changes.
+
+        Runs ``git status --porcelain`` to check for modifications.
+
+        Returns:
+            True if changes detected, False if clean, None if not a git repo
+            or git is unavailable.
+        """
+        from ouroboros.evaluation.mechanical import run_command
+
+        try:
+            cmd_result = await run_command(
+                ("git", "status", "--porcelain"),
+                timeout=10,
+                working_dir=working_dir,
+            )
+            if cmd_result.return_code != 0:
+                return None
+            return bool(cmd_result.stdout.strip())
+        except Exception:
+            return None
+
+    def _format_evaluation_result(
+        self, result, *, code_changes: bool | None = None
+    ) -> str:
         """Format evaluation result as human-readable text.
 
         Args:
             result: EvaluationResult from pipeline.
+            code_changes: Whether working tree has code changes (Stage 1 context).
 
         Returns:
             Formatted text representation.
@@ -1645,6 +1679,24 @@ class EvaluateHandler:
                     result.failure_reason or "Unknown",
                 ]
             )
+            # Contextual annotation for Stage 1 failures
+            stage1_failed = result.stage1_result and not result.stage1_result.passed
+            if stage1_failed and code_changes is True:
+                lines.extend(
+                    [
+                        "",
+                        "⚠ Code changes detected — these are real build/test failures "
+                        "that need to be fixed before re-evaluating.",
+                    ]
+                )
+            elif stage1_failed and code_changes is False:
+                lines.extend(
+                    [
+                        "",
+                        "ℹ No code changes detected in the working tree. These failures "
+                        "are expected if you haven't run `ooo run` yet to produce code.",
+                    ]
+                )
 
         return "\n".join(lines)
 
