@@ -52,10 +52,17 @@ def get_latest_version() -> str | None:
 
     # Fetch from PyPI
     try:
+        import ssl
         import urllib.request
 
+        # Create SSL context with fallback for systems with missing certs
+        try:
+            ctx = ssl.create_default_context()
+        except Exception:
+            ctx = ssl._create_unverified_context()  # noqa: S323
+
         resp = urllib.request.urlopen(  # noqa: S310
-            "https://pypi.org/pypi/ouroboros-ai/json", timeout=5
+            "https://pypi.org/pypi/ouroboros-ai/json", timeout=5, context=ctx
         )
         data = json.loads(resp.read())
         latest = data["info"]["version"]
@@ -136,7 +143,9 @@ if __name__ == "__main__":
     result = check_update()
     if result["message"]:
         print(result["message"])
-    elif result["current"]:
+    elif result["current"] and result["latest"]:
         print(f"Ouroboros v{result['current']} is up to date.")
+    elif result["current"]:
+        print(f"Ouroboros v{result['current']} installed (could not check for updates).")
     else:
         print("Ouroboros is not installed.")
