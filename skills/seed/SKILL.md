@@ -85,6 +85,8 @@ ontology_schema:
     - name: title
       type: string
       description: Task title
+metadata:
+  ambiguity_score: 0.15
 ```
 
 ## After Seed Generation
