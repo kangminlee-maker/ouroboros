@@ -23,10 +23,18 @@ _PID_FILE = _PID_DIR / "mcp-server.pid"
 _stderr_console = Console(stderr=True)
 
 
-def _write_pid_file() -> None:
-    """Write current PID to file for stale instance detection."""
-    _PID_DIR.mkdir(parents=True, exist_ok=True)
-    _PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+def _write_pid_file() -> bool:
+    """Write current PID to file for stale instance detection.
+
+    Returns:
+        True if the PID file was written successfully, False otherwise.
+    """
+    try:
+        _PID_DIR.mkdir(parents=True, exist_ok=True)
+        _PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
+    except OSError:
+        return False
+    return True
 
 
 def _cleanup_pid_file() -> None:
@@ -43,7 +51,12 @@ def _check_stale_instance() -> bool:
     Returns:
         True if a stale instance was cleaned up.
     """
-    if not _PID_FILE.exists():
+    try:
+        pid_exists = _PID_FILE.exists()
+    except OSError:
+        return False
+
+    if not pid_exists:
         return False
 
     try:

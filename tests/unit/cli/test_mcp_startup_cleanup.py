@@ -301,6 +301,32 @@ class TestMCPStartupAutoCleanup:
 
         mock_console.print.assert_any_call("[yellow]Auto-cancelled 1 orphaned session(s)[/yellow]")
 
+    @pytest.mark.asyncio
+    async def test_pid_file_write_failure_does_not_block_startup(self) -> None:
+        """Test that PID file permission errors do not block server startup."""
+        mock_es, mock_repo, mock_server = self._create_patches(cancelled_sessions=[])
+
+        with (
+            patch(
+                "ouroboros.persistence.event_store.EventStore",
+                return_value=mock_es,
+            ),
+            patch(
+                "ouroboros.orchestrator.session.SessionRepository",
+                return_value=mock_repo,
+            ),
+            patch(
+                "ouroboros.mcp.server.adapter.create_ouroboros_server",
+                return_value=mock_server,
+            ),
+            patch("pathlib.Path.write_text", side_effect=PermissionError("denied")),
+        ):
+            from ouroboros.cli.commands.mcp import _run_mcp_server
+
+            await _run_mcp_server("localhost", 8080, "stdio")
+
+        mock_server.serve.assert_called_once()
+
 
 class TestFindOrphanedSessionsEdgeCases:
     """Additional edge-case tests for orphan detection logic."""
