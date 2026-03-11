@@ -64,17 +64,16 @@ When the user invokes this skill:
      Arguments:
        job_id: <job_id from step 3>
        cursor: <cursor from previous response, starts at 0>
-       timeout_seconds: 10
+       timeout_seconds: 60
 
-     # Show intermediate progress to user each poll:
-     #   Phase, AC progress, subtask status, etc.
+     # Returns immediately when state changes; waits up to 60s otherwise.
+     # This reduces tool call round-trips and context consumption.
      # Continue until status is "completed", "failed", or "cancelled"
    ```
 
-   Between polls, report progress to the user:
+   Between polls, report progress concisely (one line):
    ```
-   [Execution in progress]
-   Phase: <current_phase> | AC Progress: <completed>/<total>
+   [Executing] Phase: <current_phase> | AC: <completed>/<total>
    ```
 
 6. **Fetch final result** with `ouroboros_job_result`:

@@ -55,11 +55,12 @@ When the user invokes this skill:
        cursor = job.meta["cursor"]
 
        # Poll for progress (non-blocking, shows intermediate state)
+       # Use timeout_seconds=60 to reduce context consumption
        while not terminal:
-           wait_result = await job_wait(job_id, cursor, timeout_seconds=10)
+           wait_result = await job_wait(job_id, cursor, timeout_seconds=60)
            cursor = wait_result.meta["cursor"]
            status = wait_result.meta["status"]
-           # Report progress to user each poll cycle
+           # Report progress concisely (one line per poll)
            terminal = status in ("completed", "failed", "cancelled")
 
        # Fetch final result

@@ -3167,9 +3167,9 @@ class JobWaitHandler:
                 MCPToolParameter(
                     name="timeout_seconds",
                     type=ToolInputType.INTEGER,
-                    description="Maximum seconds to wait for a change",
+                    description="Maximum seconds to wait for a change (longer = fewer round-trips)",
                     required=False,
-                    default=10,
+                    default=30,
                 ),
             ),
         )
@@ -3188,7 +3188,7 @@ class JobWaitHandler:
             )
 
         cursor = int(arguments.get("cursor", 0))
-        timeout_seconds = int(arguments.get("timeout_seconds", 10))
+        timeout_seconds = int(arguments.get("timeout_seconds", 30))
 
         try:
             snapshot, changed = await self._job_manager.wait_for_change(
