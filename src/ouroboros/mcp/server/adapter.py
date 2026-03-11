@@ -506,6 +506,7 @@ def create_ouroboros_server(
     from ouroboros.orchestrator.runner import (
         OrchestratorRunner,
     )
+
     # Create LLM adapter (shared across services)
     # Use ClaudeAgentAdapter for interview/explore — ClaudeCodeAdapter with
     # max_turns=1 prevented multi-turn tool use (codebase exploration).
