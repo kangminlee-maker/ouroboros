@@ -28,7 +28,7 @@ from ouroboros.core.types import Result
 from ouroboros.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    pass
+    from ouroboros.providers.base import CompletionConfig, CompletionResponse, Message
 
 log = get_logger(__name__)
 
@@ -462,9 +462,9 @@ class ClaudeAgentAdapter:
 
     async def complete(
         self,
-        messages: list["Message"],
-        config: "CompletionConfig",
-    ) -> "Result[CompletionResponse, ProviderError]":
+        messages: list[Message],
+        config: CompletionConfig,
+    ) -> Result[CompletionResponse, ProviderError]:
         """LLMAdapter-compatible completion interface.
 
         Bridges ClaudeAgentAdapter to the LLMAdapter protocol so it can be
