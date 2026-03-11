@@ -114,11 +114,17 @@ class ExecuteSeedHandler:
     async def handle(
         self,
         arguments: dict[str, Any],
+        *,
+        execution_id: str | None = None,
+        session_id_override: str | None = None,
     ) -> Result[MCPToolResult, MCPServerError]:
         """Handle a seed execution request.
 
         Args:
             arguments: Tool arguments including seed_content.
+            execution_id: Pre-allocated execution ID (used by StartExecuteSeedHandler).
+            session_id_override: Pre-allocated session ID for new executions
+                (used by StartExecuteSeedHandler).
 
         Returns:
             Result containing execution result or error.
@@ -133,8 +139,7 @@ class ExecuteSeedHandler:
             )
 
         session_id = arguments.get("session_id")
-        execution_id = arguments.get("_execution_id")
-        new_session_id = arguments.get("_new_session_id")
+        new_session_id = session_id_override
         model_tier = arguments.get("model_tier", "medium")
         max_iterations = arguments.get("max_iterations", 10)
 
@@ -2761,8 +2766,36 @@ class CancelExecutionHandler:
             )
 
 
+_render_cache: dict[tuple[str, int], str] = {}
+_RENDER_CACHE_MAX = 64
+
+
 async def _render_job_snapshot(snapshot: JobSnapshot, event_store: EventStore) -> str:
-    """Format a user-facing job summary with linked execution context."""
+    """Format a user-facing job summary with linked execution context.
+
+    Results are cached by (job_id, cursor) to avoid redundant EventStore queries
+    when the same snapshot is rendered repeatedly (e.g. poll loops).
+    Terminal snapshots are never cached since they won't change.
+    """
+    cache_key = (snapshot.job_id, snapshot.cursor)
+    if not snapshot.is_terminal and cache_key in _render_cache:
+        return _render_cache[cache_key]
+
+    text = await _render_job_snapshot_inner(snapshot, event_store)
+
+    if not snapshot.is_terminal:
+        if len(_render_cache) >= _RENDER_CACHE_MAX:
+            # Evict oldest entries
+            to_remove = list(_render_cache.keys())[: _RENDER_CACHE_MAX // 2]
+            for key in to_remove:
+                _render_cache.pop(key, None)
+        _render_cache[cache_key] = text
+
+    return text
+
+
+async def _render_job_snapshot_inner(snapshot: JobSnapshot, event_store: EventStore) -> str:
+    """Inner render without caching."""
     lines = [
         f"## Job: {snapshot.job_id}",
         "",
@@ -2926,12 +2959,11 @@ class StartExecuteSeedHandler:
             new_session_id = f"orch_{uuid4().hex[:12]}"
 
         async def _runner() -> MCPToolResult:
-            job_args = dict(arguments)
-            if execution_id:
-                job_args["_execution_id"] = execution_id
-            if new_session_id:
-                job_args["_new_session_id"] = new_session_id
-            result = await self._execute_handler.handle(job_args)
+            result = await self._execute_handler.handle(
+                arguments,
+                execution_id=execution_id,
+                session_id_override=new_session_id,
+            )
             if result.is_err:
                 raise RuntimeError(str(result.error))
             return result.value
@@ -3116,7 +3148,7 @@ class JobWaitHandler:
             name="ouroboros_job_wait",
             description=(
                 "Wait briefly for a background job to change state. "
-                "Useful for conversational 'continue' or '지금 뭐해?' flows."
+                "Useful for conversational polling after a start command."
             ),
             parameters=(
                 MCPToolParameter(

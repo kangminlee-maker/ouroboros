@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
@@ -67,6 +67,9 @@ def _safe_meta(value: Any) -> Any:
     return str(value)
 
 
+_JOB_TTL = timedelta(hours=1)
+
+
 class JobManager:
     """Owns background MCP jobs and persists their state as events."""
 
@@ -75,6 +78,7 @@ class JobManager:
         self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._monitors: dict[str, asyncio.Task[None]] = {}
         self._initialized = False
+        self._known_job_ids: set[str] = set()
 
     async def _ensure_initialized(self) -> None:
         if not self._initialized:
@@ -110,6 +114,7 @@ class JobManager:
             },
         )
 
+        self._known_job_ids.add(job_id)
         task = asyncio.create_task(self._run_job(job_id, job_type, runner))
         self._tasks[job_id] = task
         self._monitors[job_id] = asyncio.create_task(self._monitor_job(job_id))
@@ -175,8 +180,9 @@ class JobManager:
     async def _monitor_job(self, job_id: str) -> None:
         """Mirror linked execution/lineage progress into job updates."""
         last_message: str | None = None
+        interval = 1.0
         while True:
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(interval)
             snapshot = await self.get_snapshot(job_id)
             if snapshot.is_terminal:
                 return
@@ -185,6 +191,9 @@ class JobManager:
             if message and message != last_message:
                 await self.update_status(job_id, snapshot.status, message)
                 last_message = message
+                interval = 1.0  # Reset on change
+            else:
+                interval = min(interval * 1.5, 5.0)  # Backoff up to 5s
 
     async def _derive_status_message(self, snapshot: JobSnapshot) -> str | None:
         """Summarize linked execution or lineage progress."""
@@ -362,6 +371,31 @@ class JobManager:
                 task.cancel()
 
         return await self.get_snapshot(job_id)
+
+    async def cleanup_expired_jobs(self, ttl: timedelta | None = None) -> int:
+        """Remove terminal jobs older than *ttl* from the in-memory registry.
+
+        Returns the number of cleaned-up job IDs.
+        """
+        ttl = ttl or _JOB_TTL
+        now = datetime.now(UTC)
+        expired: list[str] = []
+        for job_id in list(self._known_job_ids):
+            try:
+                snapshot = await self.get_snapshot(job_id)
+            except ValueError:
+                expired.append(job_id)
+                continue
+            updated = snapshot.updated_at
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=UTC)
+            if snapshot.is_terminal and updated < now - ttl:
+                expired.append(job_id)
+        for job_id in expired:
+            self._known_job_ids.discard(job_id)
+            self._tasks.pop(job_id, None)
+            self._monitors.pop(job_id, None)
+        return len(expired)
 
     async def _append_event(self, event_type: str, job_id: str, data: dict[str, Any]) -> None:
         """Persist one job event."""
