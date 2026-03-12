@@ -22,6 +22,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ouroboros.core.errors import ProviderError
@@ -29,7 +30,7 @@ from ouroboros.core.types import Result
 from ouroboros.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    from ouroboros.providers.base import CompletionConfig, CompletionResponse, Message
+    pass  # reserved for future type-only imports
 
 log = get_logger(__name__)
 
@@ -205,15 +206,21 @@ class TaskResult:
 class AgentRuntime(Protocol):
     """Protocol for autonomous agent runtimes used by the orchestrator."""
 
-    async def execute_task(
+    def execute_task(
         self,
         prompt: str,
         tools: list[str] | None = None,
         system_prompt: str | None = None,
         resume_handle: RuntimeHandle | None = None,
-        resume_session_id: str | None = None,
+        resume_session_id: str | None = None,  # Deprecated: use resume_handle instead
     ) -> AsyncIterator[AgentMessage]:
-        """Execute a task and stream normalized messages."""
+        """Execute a task and stream normalized messages.
+
+        Implementations are async generators (``async def`` with ``yield``).
+        The Protocol signature omits ``async`` so that structural subtyping
+        correctly matches async-generator methods returning ``AsyncIterator``.
+        """
+        ...
 
     async def execute_task_to_result(
         self,
@@ -221,9 +228,10 @@ class AgentRuntime(Protocol):
         tools: list[str] | None = None,
         system_prompt: str | None = None,
         resume_handle: RuntimeHandle | None = None,
-        resume_session_id: str | None = None,
+        resume_session_id: str | None = None,  # Deprecated: use resume_handle instead
     ) -> Result[TaskResult, ProviderError]:
         """Execute a task and return the collected final result."""
+        ...
 
 
 # =============================================================================
@@ -281,6 +289,8 @@ class ClaudeAgentAdapter:
         api_key: str | None = None,
         permission_mode: str = "acceptEdits",
         model: str | None = None,
+        cwd: str | Path | None = None,
+        cli_path: str | Path | None = None,
     ) -> None:
         """Initialize Claude Agent adapter.
 
@@ -293,15 +303,21 @@ class ClaudeAgentAdapter:
                 - "default": Require canUseTool callback
             model: Claude model to use (e.g., "claude-sonnet-4-6").
                 If not provided, uses the SDK default.
+            cwd: Working directory for tool execution and resume metadata.
+            cli_path: Optional Claude CLI path to pass through to the SDK.
         """
         self._api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         self._permission_mode = permission_mode
         self._model = model
+        self._cwd = str(Path(cwd).expanduser()) if cwd is not None else os.getcwd()
+        self._cli_path = str(Path(cli_path).expanduser()) if cli_path is not None else None
 
         log.info(
             "orchestrator.adapter.initialized",
             permission_mode=permission_mode,
             has_api_key=bool(self._api_key),
+            cwd=self._cwd,
+            cli_path=self._cli_path,
         )
 
     def _is_transient_error(self, error: Exception) -> bool:
@@ -324,7 +340,7 @@ class ClaudeAgentAdapter:
         return RuntimeHandle(
             backend="claude",
             native_session_id=native_session_id,
-            cwd=os.getcwd(),
+            cwd=self._cwd,
             approval_mode=self._permission_mode,
             updated_at=datetime.now(UTC).isoformat(),
         )
@@ -398,11 +414,14 @@ class ClaudeAgentAdapter:
                 options_kwargs: dict[str, Any] = {
                     "allowed_tools": effective_tools,
                     "permission_mode": self._permission_mode,
-                    "cwd": os.getcwd(),  # Use current working directory
+                    "cwd": self._cwd,
                 }
 
                 if self._model:
                     options_kwargs["model"] = self._model
+
+                if self._cli_path:
+                    options_kwargs["cli_path"] = self._cli_path
 
                 if system_prompt:
                     options_kwargs["system_prompt"] = system_prompt
@@ -421,7 +440,10 @@ class ClaudeAgentAdapter:
                     session_id = getattr(sdk_message, "session_id", None) or agent_message.data.get(
                         "session_id"
                     )
-                    if session_id:
+                    if session_id and (
+                        session_id != current_session_id
+                        or current_runtime_handle is None
+                    ):
                         current_session_id = session_id  # Save for potential retry
                         current_runtime_handle = self._build_runtime_handle(session_id)
 
@@ -498,7 +520,11 @@ class ClaudeAgentAdapter:
                 data={
                     "subtype": "error",
                     "error_type": type(last_error).__name__,
-                    **({"session_id": current_session_id} if current_session_id else {}),
+                    **(
+                        {"session_id": current_session_id}
+                        if current_session_id
+                        else {}
+                    ),
                 },
                 resume_handle=current_runtime_handle,
             )
@@ -600,91 +626,6 @@ class ClaudeAgentAdapter:
             content=content,
             tool_name=tool_name,
             data=data,
-        )
-
-    async def complete(
-        self,
-        messages: list[Message],
-        config: CompletionConfig,
-    ) -> Result[CompletionResponse, ProviderError]:
-        """LLMAdapter-compatible completion interface.
-
-        Bridges ClaudeAgentAdapter to the LLMAdapter protocol so it can be
-        used by InterviewEngine and other components that expect complete().
-
-        Args:
-            messages: Conversation messages (system, user, assistant).
-            config: Completion configuration (model, temperature, etc.).
-
-        Returns:
-            Result containing CompletionResponse or ProviderError.
-        """
-        from ouroboros.providers.base import (
-            CompletionResponse,
-            MessageRole,
-            UsageInfo,
-        )
-
-        # Extract system prompt from messages
-        system_msgs = [m for m in messages if m.role == MessageRole.SYSTEM]
-        non_system_msgs = [m for m in messages if m.role != MessageRole.SYSTEM]
-        system_prompt = system_msgs[0].content if system_msgs else None
-
-        # Build prompt from non-system messages.
-        # For the first interview round, conversation_history is empty
-        # so we must provide a minimal user prompt to prevent execute_task()
-        # from early-returning. The system_prompt carries the full context.
-        prompt_parts: list[str] = []
-        for m in non_system_msgs:
-            prompt_parts.append(f"[{m.role.value}]\n{m.content}")
-        prompt = "\n\n".join(prompt_parts) if prompt_parts else "Proceed."
-
-        # Allow read-only tools so the LLM can explore the codebase
-        # when generating interview questions for brownfield projects.
-        tools = ["Read", "Glob", "Grep"]
-        assistant_texts: list[str] = []
-        error_content: str | None = None
-
-        async for message in self.execute_task(
-            prompt=prompt,
-            tools=tools,
-            system_prompt=system_prompt,
-        ):
-            if message.type == "assistant" and message.content:
-                assistant_texts.append(message.content)
-            elif message.is_final and message.is_error:
-                error_content = message.content
-
-        if error_content:
-            return Result.err(
-                ProviderError(
-                    message=error_content,
-                    details={"assistant_texts": assistant_texts},
-                )
-            )
-
-        # Use the last assistant message as the primary content
-        content = assistant_texts[-1] if assistant_texts else ""
-
-        if not content:
-            return Result.err(
-                ProviderError(
-                    message="Empty response from Claude Agent SDK",
-                    details={"message_count": len(assistant_texts)},
-                )
-            )
-
-        return Result.ok(
-            CompletionResponse(
-                content=content,
-                model=self._model or "claude-agent-sdk",
-                usage=UsageInfo(
-                    prompt_tokens=0,
-                    completion_tokens=0,
-                    total_tokens=0,
-                ),
-                finish_reason="stop",
-            )
         )
 
     async def execute_task_to_result(

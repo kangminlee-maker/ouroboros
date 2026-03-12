@@ -6,6 +6,7 @@ Start and manage the MCP (Model Context Protocol) server.
 from __future__ import annotations
 
 import asyncio
+from enum import Enum
 import os
 from pathlib import Path
 from typing import Annotated
@@ -23,18 +24,25 @@ _PID_FILE = _PID_DIR / "mcp-server.pid"
 _stderr_console = Console(stderr=True)
 
 
-def _write_pid_file() -> bool:
-    """Write current PID to file for stale instance detection.
+class AgentRuntimeBackend(str, Enum):
+    """Supported orchestrator runtime backends for MCP commands."""
 
-    Returns:
-        True if the PID file was written successfully, False otherwise.
-    """
-    try:
-        _PID_DIR.mkdir(parents=True, exist_ok=True)
-        _PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
-    except OSError:
-        return False
-    return True
+    CLAUDE = "claude"
+    CODEX = "codex"
+
+
+class LLMBackend(str, Enum):
+    """Supported LLM-only backends for MCP commands."""
+
+    CLAUDE_CODE = "claude_code"
+    LITELLM = "litellm"
+    CODEX = "codex"
+
+
+def _write_pid_file() -> None:
+    """Write current PID to file for stale instance detection."""
+    _PID_DIR.mkdir(parents=True, exist_ok=True)
+    _PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
 
 
 def _cleanup_pid_file() -> None:
@@ -51,12 +59,7 @@ def _check_stale_instance() -> bool:
     Returns:
         True if a stale instance was cleaned up.
     """
-    try:
-        pid_exists = _PID_FILE.exists()
-    except OSError:
-        return False
-
-    if not pid_exists:
+    if not _PID_FILE.exists():
         return False
 
     try:
@@ -73,11 +76,6 @@ def _check_stale_instance() -> bool:
         return True
     except PermissionError:
         return False  # Process exists but we can't signal it
-    except OSError:
-        # Windows: os.kill(pid, 0) raises OSError (WinError 87)
-        # since signal 0 is not supported. Treat as stale.
-        _cleanup_pid_file()
-        return True
 
 
 app = typer.Typer(
@@ -92,6 +90,8 @@ async def _run_mcp_server(
     port: int,
     transport: str,
     db_path: str | None = None,
+    runtime_backend: str | None = None,
+    llm_backend: str | None = None,
 ) -> None:
     """Run the MCP server.
 
@@ -100,6 +100,8 @@ async def _run_mcp_server(
         port: Port to bind to.
         transport: Transport type (stdio or sse).
         db_path: Optional path to EventStore database.
+        runtime_backend: Optional orchestrator runtime backend override.
+        llm_backend: Optional LLM-only backend override.
     """
     from ouroboros.mcp.server.adapter import create_ouroboros_server
     from ouroboros.orchestrator.session import SessionRepository
@@ -133,6 +135,8 @@ async def _run_mcp_server(
         name="ouroboros-mcp",
         version="1.0.0",
         event_store=event_store,
+        runtime_backend=runtime_backend,
+        llm_backend=llm_backend,
     )
 
     tool_count = len(server.info.tools)
@@ -199,6 +203,22 @@ def serve(
             help="Path to EventStore database (default: ~/.ouroboros/ouroboros.db)",
         ),
     ] = "",
+    runtime: Annotated[
+        AgentRuntimeBackend | None,
+        typer.Option(
+            "--runtime",
+            help="Agent runtime backend for orchestrator-driven tools (claude or codex).",
+            case_sensitive=False,
+        ),
+    ] = None,
+    llm_backend: Annotated[
+        LLMBackend | None,
+        typer.Option(
+            "--llm-backend",
+            help="LLM backend for interview/seed/evaluation tools (claude_code, litellm, or codex).",
+            case_sensitive=False,
+        ),
+    ] = None,
 ) -> None:
     """Start the MCP server.
 
@@ -218,10 +238,25 @@ def serve(
 
         # Start with SSE transport on custom port
         ouroboros mcp serve --transport sse --port 9000
+
+        # Start with Codex runtime for orchestrator-driven tools
+        ouroboros mcp serve --runtime codex
+
+        # Use Codex CLI for LLM-only tools as well
+        ouroboros mcp serve --runtime codex --llm-backend codex
     """
     try:
         db_path = db if db else None
-        asyncio.run(_run_mcp_server(host, port, transport, db_path))
+        asyncio.run(
+            _run_mcp_server(
+                host,
+                port,
+                transport,
+                db_path,
+                runtime.value if runtime else None,
+                llm_backend.value if llm_backend else None,
+            )
+        )
     except KeyboardInterrupt:
         print_info("\nMCP Server stopped")
     except ImportError as e:
@@ -235,13 +270,30 @@ def serve(
             "  1. Check if another MCP server is running: cat ~/.ouroboros/mcp-server.pid\n"
             "  2. Kill stale process: kill $(cat ~/.ouroboros/mcp-server.pid)\n"
             "  3. Remove stale PID: rm ~/.ouroboros/mcp-server.pid\n"
-            "  4. Restart Claude Code"
+            "  4. Restart your MCP client"
         )
         raise typer.Exit(1) from e
 
 
 @app.command()
-def info() -> None:
+def info(
+    runtime: Annotated[
+        AgentRuntimeBackend | None,
+        typer.Option(
+            "--runtime",
+            help="Agent runtime backend for orchestrator-driven tools (claude or codex).",
+            case_sensitive=False,
+        ),
+    ] = None,
+    llm_backend: Annotated[
+        LLMBackend | None,
+        typer.Option(
+            "--llm-backend",
+            help="LLM backend for interview/seed/evaluation tools (claude_code, litellm, or codex).",
+            case_sensitive=False,
+        ),
+    ] = None,
+) -> None:
     """Show MCP server information and available tools."""
     from ouroboros.cli.formatters import console
     from ouroboros.mcp.server.adapter import create_ouroboros_server
@@ -250,6 +302,8 @@ def info() -> None:
     server = create_ouroboros_server(
         name="ouroboros-mcp",
         version="1.0.0",
+        runtime_backend=runtime.value if runtime else None,
+        llm_backend=llm_backend.value if llm_backend else None,
     )
 
     server_info = server.info
