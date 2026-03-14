@@ -61,28 +61,24 @@ impl OuroborosDb {
     }
 
     pub fn read_new_events(&mut self) -> Vec<EventRow> {
-        let query = match &self.last_seen_id {
-            Some(last_id) => {
-                let ts_query = format!(
-                    "SELECT id, aggregate_type, aggregate_id, event_type, payload, timestamp \
-                     FROM events WHERE timestamp > (SELECT timestamp FROM events WHERE id = '{}') \
-                     ORDER BY timestamp ASC",
-                    last_id.replace('\'', "''")
-                );
-                ts_query
-            }
+        let last_id = match &self.last_seen_id {
+            Some(id) => id.clone(),
             None => {
                 return self.read_all_events();
             }
         };
 
-        let mut stmt = match self.conn.prepare(&query) {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, aggregate_type, aggregate_id, event_type, payload, timestamp \
+             FROM events WHERE timestamp > (SELECT timestamp FROM events WHERE id = ?1) \
+             ORDER BY timestamp ASC",
+        ) {
             Ok(s) => s,
             Err(_) => return Vec::new(),
         };
 
         let rows: Vec<EventRow> = stmt
-            .query_map([], |row| {
+            .query_map([&last_id], |row| {
                 let payload_str: String = row.get(4)?;
                 let payload: Value = serde_json::from_str(&payload_str).unwrap_or(Value::Null);
                 Ok(EventRow {
@@ -108,6 +104,38 @@ impl OuroborosDb {
         self.conn
             .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
             .unwrap_or(0)
+    }
+
+    pub fn read_events_for_session(&mut self, aggregate_id: &str) -> Vec<EventRow> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, aggregate_type, aggregate_id, event_type, payload, timestamp \
+             FROM events WHERE aggregate_id = ?1 ORDER BY timestamp ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return Vec::new(),
+        };
+
+        let rows: Vec<EventRow> = stmt
+            .query_map([aggregate_id], |row| {
+                let payload_str: String = row.get(4)?;
+                let payload: Value = serde_json::from_str(&payload_str).unwrap_or(Value::Null);
+                Ok(EventRow {
+                    id: row.get(0)?,
+                    aggregate_type: row.get(1)?,
+                    aggregate_id: row.get(2)?,
+                    event_type: row.get(3)?,
+                    payload,
+                    timestamp: row.get(5)?,
+                })
+            })
+            .ok()
+            .map(|iter| iter.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+
+        if let Some(last) = rows.last() {
+            self.last_seen_id = Some(last.id.clone());
+        }
+        rows
     }
 
     pub fn distinct_sessions(&self) -> Vec<(String, String, String, usize)> {
@@ -154,6 +182,9 @@ pub fn populate_state_from_events(state: &mut AppState, events: &[EventRow]) {
                 .and_then(|v| v.as_str())
                 .map(String::from),
         });
+        if state.execution_events.len() > 500 {
+            state.execution_events.drain(..state.execution_events.len() - 500);
+        }
 
         let log_level = if ev.event_type.contains("fail") || ev.event_type.contains("error") {
             LogLevel::Error
@@ -353,8 +384,126 @@ pub fn populate_state_from_events(state: &mut AppState, events: &[EventRow]) {
                     state.iteration = round as u32;
                 }
             }
+            "lineage.created" => {
+                let goal = ev
+                    .payload
+                    .get("goal")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                state.lineages.push(Lineage {
+                    id: ev.aggregate_id.clone(),
+                    seed_goal: goal,
+                    generations: Vec::new(),
+                    current_gen: 0,
+                    converged: false,
+                });
+            }
+            "lineage.generation.started" => {
+                if let Some(lin) = state.lineages.iter_mut().find(|l| l.id == ev.aggregate_id) {
+                    let gen_num = ev
+                        .payload
+                        .get("generation_number")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(1) as u32;
+                    lin.current_gen = gen_num;
+                    lin.generations.push(LineageGeneration {
+                        number: gen_num,
+                        status: ACStatus::Executing,
+                        score: 0.0,
+                        ac_pass_count: 0,
+                        ac_total: 0,
+                        summary: ev
+                            .payload
+                            .get("phase")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("executing")
+                            .to_string(),
+                    });
+                }
+            }
+            "lineage.generation.completed" => {
+                if let Some(lin) = state.lineages.iter_mut().find(|l| l.id == ev.aggregate_id) {
+                    let gen_num = ev
+                        .payload
+                        .get("generation_number")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(1) as u32;
+                    if let Some(gen) = lin.generations.iter_mut().find(|g| g.number == gen_num) {
+                        gen.status = ACStatus::Completed;
+                        if let Some(eval) = ev.payload.get("evaluation_summary") {
+                            gen.score = eval
+                                .get("score")
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0) as f32;
+                            gen.summary = eval
+                                .get("failure_reason")
+                                .and_then(|v| v.as_str())
+                                .or_else(|| {
+                                    if eval
+                                        .get("final_approved")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(false)
+                                    {
+                                        Some("Approved")
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .unwrap_or("Completed")
+                                .to_string();
+                        }
+                    }
+                }
+            }
+            "lineage.generation.failed" => {
+                if let Some(lin) = state.lineages.iter_mut().find(|l| l.id == ev.aggregate_id) {
+                    let gen_num = ev
+                        .payload
+                        .get("generation_number")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(1) as u32;
+                    if let Some(gen) = lin.generations.iter_mut().find(|g| g.number == gen_num) {
+                        gen.status = ACStatus::Failed;
+                        gen.summary = ev
+                            .payload
+                            .get("error")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Failed")
+                            .to_string();
+                    }
+                }
+            }
+            "lineage.converged" => {
+                if let Some(lin) = state.lineages.iter_mut().find(|l| l.id == ev.aggregate_id) {
+                    lin.converged = true;
+                }
+            }
+            "lineage.stagnated" | "lineage.rewound" | "lineage.ontology.evolved" => {
+                // tracked via logs, no state update needed
+            }
             _ => {}
         }
+    }
+
+    // Rebuild lineage list state
+    if !state.lineages.is_empty() {
+        state.lineage_list = slt::ListState::new(
+            state
+                .lineages
+                .iter()
+                .map(|l| {
+                    format!(
+                        "{} — {} (gen {}{})",
+                        l.id,
+                        crate::state::truncate(&l.seed_goal, 40),
+                        l.current_gen,
+                        if l.converged { " ✓" } else { "" }
+                    )
+                })
+                .collect::<Vec<_>>(),
+        );
     }
 
     state.rebuild_tree_state();

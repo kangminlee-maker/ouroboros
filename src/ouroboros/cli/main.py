@@ -37,9 +37,17 @@ app.add_typer(tui.app, name="tui")
 
 # Top-level convenience aliases
 @app.command(hidden=True)
-def monitor() -> None:
+def monitor(
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help="TUI backend to use: 'python' (default) or 'slt' (native binary).",
+        ),
+    ] = "python",
+) -> None:
     """Launch the TUI monitor (shorthand for 'ouroboros tui monitor')."""
-    tui.monitor_command()
+    tui.monitor_command(backend=backend)
 
 
 def version_callback(value: bool) -> None:

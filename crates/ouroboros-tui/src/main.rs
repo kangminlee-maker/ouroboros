@@ -167,7 +167,43 @@ fn main() -> std::io::Result<()> {
                     Screen::Logs => views::logs::render(ui, &mut state),
                     Screen::Debug => views::debug::render(ui, &mut state),
                     Screen::Lineage => views::lineage::render(ui, &mut state),
-                    Screen::SessionSelector => views::session_selector::render(ui, &mut state),
+                    Screen::SessionSelector => {
+                        if let Some(idx) = views::session_selector::render(ui, &mut state) {
+                            if let Some(session) = state.sessions.get(idx) {
+                                let agg_id = session.aggregate_id.clone();
+                                if let Some(ref mut conn) = ouro_db {
+                                    // Reset state for new session
+                                    let mut new_state = AppState::new();
+                                    // Preserve sessions list
+                                    new_state.sessions = state.sessions.clone();
+                                    new_state.session_list = slt::ListState::new(
+                                        new_state
+                                            .sessions
+                                            .iter()
+                                            .map(|s| {
+                                                format!(
+                                                    "{} — {} ({} events)",
+                                                    s.aggregate_type,
+                                                    s.aggregate_id,
+                                                    s.event_count
+                                                )
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    );
+                                    let events = conn.read_events_for_session(&agg_id);
+                                    db::populate_state_from_events(&mut new_state, &events);
+                                    new_state.add_log(
+                                        LogLevel::Info,
+                                        "tui",
+                                        &format!("Loaded session: {agg_id}"),
+                                    );
+                                    state = new_state;
+                                }
+                                state.screen = Screen::Dashboard;
+                                state.tabs.selected = 0;
+                            }
+                        }
+                    }
                 });
 
                 render_footer(ui);
@@ -231,7 +267,7 @@ fn handle_global_keys(ui: &mut Context, state: &mut AppState) {
     if ui.key('e') && !on_logs {
         state.tabs.selected = 4;
     }
-    if ui.key('s') && !state.command_palette.open {
+    if ui.key('s') && !state.command_palette.open && !on_logs {
         state.screen = Screen::SessionSelector;
     }
 }
@@ -252,8 +288,8 @@ fn render_header(ui: &mut Context, state: &AppState) {
             ui.spacer();
 
             if !state.session_id.is_empty() {
-                ui.text(&state.session_id[..14.min(state.session_id.len())])
-                    .fg(secondary);
+                let sid: String = state.session_id.chars().take(14).collect();
+                ui.text(&sid).fg(secondary);
                 ui.text("  ").fg(dim);
             }
 
@@ -309,14 +345,16 @@ fn render_tab_bar(ui: &mut Context, state: &mut AppState) {
         ui.spacer();
     });
 
-    state.screen = match state.tabs.selected {
-        0 => Screen::Dashboard,
-        1 => Screen::Execution,
-        2 => Screen::Logs,
-        3 => Screen::Debug,
-        4 => Screen::Lineage,
-        _ => Screen::Dashboard,
-    };
+    if state.screen != Screen::SessionSelector {
+        state.screen = match state.tabs.selected {
+            0 => Screen::Dashboard,
+            1 => Screen::Execution,
+            2 => Screen::Logs,
+            3 => Screen::Debug,
+            4 => Screen::Lineage,
+            _ => Screen::Dashboard,
+        };
+    }
 }
 
 fn render_footer(ui: &mut Context) {

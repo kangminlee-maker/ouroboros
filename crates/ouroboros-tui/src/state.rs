@@ -288,6 +288,7 @@ pub struct AppState {
     // Execution
     pub execution_events: Vec<ExecutionEvent>,
     pub execution_scroll: ScrollState,
+    pub event_timeline_scroll: ScrollState,
     pub phase_outputs: HashMap<String, Vec<String>>,
     pub log_table: TableState,
 
@@ -368,6 +369,7 @@ impl AppState {
 
             execution_events: Vec::new(),
             execution_scroll: ScrollState::new(),
+            event_timeline_scroll: ScrollState::new(),
             phase_outputs: HashMap::new(),
             log_table: TableState::new(
                 vec!["Time", "Level", "Source", "Message"],

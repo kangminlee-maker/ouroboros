@@ -1,8 +1,9 @@
-use slt::{Border, Context};
+use slt::{Border, Context, KeyCode};
 
 use crate::state::*;
 
-pub fn render(ui: &mut Context, state: &mut AppState) {
+/// Returns Some(selected_index) when Enter is pressed, None otherwise.
+pub fn render(ui: &mut Context, state: &mut AppState) -> Option<usize> {
     let dim = ui.theme().text_dim;
     let surface = ui.theme().surface;
     let surface_hover = ui.theme().surface_hover;
@@ -10,13 +11,29 @@ pub fn render(ui: &mut Context, state: &mut AppState) {
     let secondary = ui.theme().secondary;
     let accent = ui.theme().accent;
 
+    // Esc returns to previous screen
+    if ui.key_code(KeyCode::Esc) {
+        state.screen = Screen::Dashboard;
+        state.tabs.selected = 0;
+    }
+
+    let mut selected = None;
+
+    // Enter selects session
+    if ui.key_code(KeyCode::Enter) && !state.sessions.is_empty() {
+        selected = Some(state.session_list.selected);
+    }
+
     ui.container().grow(1).gap(1).col(|ui| {
         ui.container().bg(surface_hover).px(3).py(1).col(|ui| {
             ui.text("Session Selector").fg(text).bold();
-            ui.text(
-                "Select a session to monitor. Sessions are loaded from the EventStore database.",
-            )
-            .fg(dim);
+            ui.row(|ui| {
+                ui.text("Select a session to monitor. ").fg(dim);
+                ui.text("Enter").fg(accent);
+                ui.text(" select  ").fg(dim);
+                ui.text("Esc").fg(accent);
+                ui.text(" back").fg(dim);
+            });
         });
 
         ui.container()
@@ -53,4 +70,6 @@ pub fn render(ui: &mut Context, state: &mut AppState) {
             }
         }
     });
+
+    selected
 }

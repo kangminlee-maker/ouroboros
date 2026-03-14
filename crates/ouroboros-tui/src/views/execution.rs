@@ -114,7 +114,7 @@ pub fn render(ui: &mut Context, state: &mut AppState) {
                         ui.text("No events yet").fg(dim);
                     });
                 } else {
-                    ui.scrollable(&mut state.detail_scroll).grow(1).col(|ui| {
+                    ui.scrollable(&mut state.event_timeline_scroll).grow(1).col(|ui| {
                         let events: Vec<ExecutionEvent> = if state.execution_events.is_empty() {
                             state
                                 .raw_events

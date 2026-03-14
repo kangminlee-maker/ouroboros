@@ -90,21 +90,21 @@ def main(
 
 def _run_slt_backend(db_path: Path) -> None:
     import shutil
-    import subprocess
-    import sys
 
     bin_path = shutil.which("ouroboros-tui")
     if bin_path is None:
         print_error(
             "ouroboros-tui not found.\n\n"
             "Install options:\n"
-            "  cargo install --path crates/ouroboros-tui   (from source)\n"
-            "  Download binary from GitHub Releases        (pre-built)",
+            "  Download pre-built binary:\n"
+            "    https://github.com/Q00/ouroboros/releases/latest\n\n"
+            "  Build from source (requires Rust):\n"
+            "    cargo install --path crates/ouroboros-tui",
         )
         raise typer.Exit(1)
 
     args = [bin_path, "monitor", "--db-path", str(db_path)]
-    sys.exit(subprocess.call(args))
+    os.execv(bin_path, args)
 
 
 __all__ = ["app"]
