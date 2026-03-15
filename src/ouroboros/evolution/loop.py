@@ -33,7 +33,6 @@ from ouroboros.core.lineage import (
 )
 from ouroboros.core.seed import Seed
 from ouroboros.core.types import Result
-from ouroboros.observability.drift import DriftMeasuredEvent, DriftMeasurement
 from ouroboros.events.lineage import (
     lineage_converged,
     lineage_created,
@@ -50,6 +49,7 @@ from ouroboros.evolution.convergence import ConvergenceCriteria, ConvergenceSign
 from ouroboros.evolution.projector import LineageProjector
 from ouroboros.evolution.reflect import ReflectEngine, ReflectOutput
 from ouroboros.evolution.wonder import WonderEngine, WonderOutput
+from ouroboros.observability.drift import DriftMeasuredEvent, DriftMeasurement
 from ouroboros.persistence.event_store import EventStore
 
 logger = logging.getLogger(__name__)
