@@ -411,363 +411,419 @@ class ParallelACExecutor:
             activity="Starting parallel execution",
         )
 
-        # Execute groups sequentially, but ACs within each group in parallel
-        for level_idx, level in enumerate(dependency_graph.execution_levels):
-            level_num = level_idx + 1
+        # RC2+RC4: Shared state for resilient progress emitter
+        progress_state: dict[str, int] = {
+            "current_level": resume_from_level + 1,
+            "total_levels": total_levels,
+        }
 
-            # RC3: Skip already-completed levels on recovery
-            if level_idx < resume_from_level:
-                log.info(
-                    "parallel_executor.recovery.skipping_level",
-                    level=level_num,
-                )
-                continue
+        # Execute groups sequentially, but ACs within each group in parallel.
+        # The resilient progress emitter runs as a sibling background task
+        # and is automatically cancelled when the execution loop finishes.
+        async with anyio.create_task_group() as outer_tg:
+            outer_tg.start_soon(
+                self._resilient_progress_emitter,
+                session_id,
+                execution_id,
+                seed,
+                ac_statuses,
+                progress_state,
+            )
 
-            # Check for skipped ACs (dependencies failed)
-            executable: list[int] = []
-            skipped: list[int] = []
+            for level_idx, level in enumerate(dependency_graph.execution_levels):
+                level_num = level_idx + 1
 
-            for ac_idx in level:
-                # Skip invalid indices
-                if ac_idx < 0 or ac_idx >= total_acs:
+                # RC3: Skip already-completed levels on recovery
+                if level_idx < resume_from_level:
+                    log.info(
+                        "parallel_executor.recovery.skipping_level",
+                        level=level_num,
+                    )
                     continue
 
-                deps = dependency_graph.get_dependencies(ac_idx)
-                if any(dep in failed_indices for dep in deps):
-                    skipped.append(ac_idx)
-                else:
-                    executable.append(ac_idx)
+                # Update shared progress state for background emitter
+                progress_state["current_level"] = level_num
 
-            # Add skipped results
-            for ac_idx in skipped:
-                all_results.append(
-                    ACExecutionResult(
-                        ac_index=ac_idx,
-                        ac_content=seed.acceptance_criteria[ac_idx],
-                        success=False,
-                        error="Skipped: dependency failed",
-                    )
-                )
-                ac_statuses[ac_idx] = "skipped"
-                log.info(
-                    "parallel_executor.ac.skipped",
-                    session_id=session_id,
-                    ac_index=ac_idx,
-                    reason="dependency_failed",
-                )
+                # Check for skipped ACs (dependencies failed)
+                executable: list[int] = []
+                skipped: list[int] = []
 
-            if not executable:
-                continue
+                for ac_idx in level:
+                    # Skip invalid indices
+                    if ac_idx < 0 or ac_idx >= total_acs:
+                        continue
 
-            # Mark ACs as executing
-            for ac_idx in executable:
-                ac_statuses[ac_idx] = "executing"
+                    deps = dependency_graph.get_dependencies(ac_idx)
+                    if any(dep in failed_indices for dep in deps):
+                        skipped.append(ac_idx)
+                    else:
+                        executable.append(ac_idx)
 
-            self._console.print(
-                f"\n[cyan]Level {level_num}/{total_levels}: "
-                f"Executing ACs {[idx + 1 for idx in executable]} in parallel[/cyan]"
-            )
-            self._flush_console()
-
-            # Emit level started event
-            await self._emit_level_started(
-                session_id=session_id,
-                level=level_num,
-                ac_indices=executable,
-                total_levels=total_levels,
-            )
-
-            # Emit progress with executing status for TUI
-            await self._emit_workflow_progress(
-                session_id=session_id,
-                execution_id=execution_id,
-                seed=seed,
-                ac_statuses=ac_statuses,
-                executing_indices=executable,
-                completed_count=completed_count,
-                current_level=level_num,
-                total_levels=total_levels,
-                activity="Executing",
-            )
-
-            # Execute level in parallel using anyio task group with
-            # Supervisor retry loop for stall recovery (RC6).
-            #
-            # anyio manages cancel scopes correctly across concurrent tasks,
-            # unlike asyncio.gather which creates separate asyncio Tasks
-            # that break the SDK's internal cancel scope tracking.
-            #
-            # Stall detection uses CancelScope.deadline reset inside
-            # _execute_atomic_ac. Stalled ACs return error=_STALL_SENTINEL.
-            # The supervisor retries stalled ACs up to MAX_STALL_RETRIES times.
-
-            # Capture current contexts for this level's closure
-            current_contexts = list(level_contexts)
-
-            # Build sibling AC descriptions for parallel awareness
-            sibling_acs = (
-                [seed.acceptance_criteria[i] for i in executable] if len(executable) > 1 else []
-            )
-
-            # Supervisor: track which ACs still need execution
-            pending_in_level = list(executable)
-            level_result_map: dict[int, ACExecutionResult] = {}
-
-            for stall_attempt in range(MAX_STALL_RETRIES + 1):
-                if not pending_in_level:
-                    break
-
-                attempt_results: list[ACExecutionResult | BaseException | None] = [None] * len(
-                    pending_in_level
-                )
-
-                async def _run_ac(idx: int, ac_idx: int) -> None:
-                    async with self._semaphore:
-                        try:
-                            attempt_results[idx] = await self._execute_single_ac(
-                                ac_index=ac_idx,
-                                ac_content=seed.acceptance_criteria[ac_idx],
-                                session_id=session_id,
-                                tools=tools,
-                                system_prompt=system_prompt,
-                                seed_goal=seed.goal,
-                                depth=0,
-                                execution_id=execution_id,
-                                level_contexts=current_contexts,
-                                sibling_acs=sibling_acs,
-                            )
-                        except BaseException as e:
-                            # Never suppress anyio Cancelled — doing so breaks
-                            # the task group's cancel-scope propagation and can
-                            # cause the entire group to hang indefinitely.
-                            if isinstance(e, anyio.get_cancelled_exc_class()):
-                                raise
-                            attempt_results[idx] = e
-
-                async with anyio.create_task_group() as tg:
-                    for i, ac_idx in enumerate(pending_in_level):
-                        tg.start_soon(_run_ac, i, ac_idx)
-
-                # Classify results: completed, failed, or stalled
-                still_pending: list[int] = []
-
-                for ac_idx, result in zip(pending_in_level, attempt_results, strict=True):
-                    if isinstance(result, BaseException):
-                        # Exception → permanent failure
-                        level_result_map[ac_idx] = ACExecutionResult(
+                # Add skipped results
+                for ac_idx in skipped:
+                    all_results.append(
+                        ACExecutionResult(
                             ac_index=ac_idx,
                             ac_content=seed.acceptance_criteria[ac_idx],
                             success=False,
-                            error=str(result),
+                            error="Skipped: dependency failed",
                         )
-                    elif isinstance(result, ACExecutionResult) and result.error == _STALL_SENTINEL:
-                        # Stalled → retry if attempts remain
-                        if stall_attempt < MAX_STALL_RETRIES:
-                            still_pending.append(ac_idx)
-                            ac_id = f"ac_{ac_idx}"
-                            await self._safe_emit_event(
-                                create_ac_stall_detected_event(
-                                    session_id=session_id,
+                    )
+                    ac_statuses[ac_idx] = "skipped"
+                    log.info(
+                        "parallel_executor.ac.skipped",
+                        session_id=session_id,
+                        ac_index=ac_idx,
+                        reason="dependency_failed",
+                    )
+
+                if not executable:
+                    continue
+
+                # Mark ACs as executing
+                for ac_idx in executable:
+                    ac_statuses[ac_idx] = "executing"
+
+                self._console.print(
+                    f"\n[cyan]Level {level_num}/{total_levels}: "
+                    f"Executing ACs {[idx + 1 for idx in executable]} in parallel[/cyan]"
+                )
+                self._flush_console()
+
+                # Emit level started event
+                await self._emit_level_started(
+                    session_id=session_id,
+                    level=level_num,
+                    ac_indices=executable,
+                    total_levels=total_levels,
+                )
+
+                # Emit progress with executing status for TUI
+                await self._emit_workflow_progress(
+                    session_id=session_id,
+                    execution_id=execution_id,
+                    seed=seed,
+                    ac_statuses=ac_statuses,
+                    executing_indices=executable,
+                    completed_count=completed_count,
+                    current_level=level_num,
+                    total_levels=total_levels,
+                    activity="Executing",
+                )
+
+                # Execute level in parallel using anyio task group with
+                # Supervisor retry loop for stall recovery (RC6).
+                #
+                # anyio manages cancel scopes correctly across concurrent tasks,
+                # unlike asyncio.gather which creates separate asyncio Tasks
+                # that break the SDK's internal cancel scope tracking.
+                #
+                # Stall detection uses CancelScope.deadline reset inside
+                # _execute_atomic_ac. Stalled ACs return error=_STALL_SENTINEL.
+                # The supervisor retries stalled ACs up to MAX_STALL_RETRIES times.
+
+                # Capture current contexts for this level's closure
+                current_contexts = list(level_contexts)
+
+                # Build sibling AC descriptions for parallel awareness
+                sibling_acs = (
+                    [seed.acceptance_criteria[i] for i in executable] if len(executable) > 1 else []
+                )
+
+                # Supervisor: track which ACs still need execution
+                pending_in_level = list(executable)
+                level_result_map: dict[int, ACExecutionResult] = {}
+
+                for stall_attempt in range(MAX_STALL_RETRIES + 1):
+                    if not pending_in_level:
+                        break
+
+                    attempt_results: list[ACExecutionResult | BaseException | None] = [None] * len(
+                        pending_in_level
+                    )
+
+                    async def _run_ac(idx: int, ac_idx: int) -> None:
+                        async with self._semaphore:
+                            try:
+                                attempt_results[idx] = await self._execute_single_ac(
                                     ac_index=ac_idx,
-                                    ac_id=ac_id,
-                                    silent_seconds=STALL_TIMEOUT_SECONDS,
-                                    attempt=stall_attempt + 1,
-                                    max_attempts=MAX_STALL_RETRIES + 1,
-                                    action="restart",
-                                )
-                            )
-                            log.warning(
-                                "parallel_executor.supervisor.stall_retry",
-                                session_id=session_id,
-                                ac_index=ac_idx,
-                                attempt=stall_attempt + 1,
-                                max_retries=MAX_STALL_RETRIES,
-                            )
-                            self._console.print(
-                                f"  [yellow]AC {ac_idx + 1}: Stall detected "
-                                f"(attempt {stall_attempt + 1}/{MAX_STALL_RETRIES + 1}), "
-                                f"retrying...[/yellow]"
-                            )
-                            self._flush_console()
-                        else:
-                            # Exhausted retries → permanent failure
-                            ac_id = f"ac_{ac_idx}"
-                            await self._safe_emit_event(
-                                create_ac_stall_detected_event(
+                                    ac_content=seed.acceptance_criteria[ac_idx],
                                     session_id=session_id,
-                                    ac_index=ac_idx,
-                                    ac_id=ac_id,
-                                    silent_seconds=STALL_TIMEOUT_SECONDS,
-                                    attempt=stall_attempt + 1,
-                                    max_attempts=MAX_STALL_RETRIES + 1,
-                                    action="abandon",
+                                    tools=tools,
+                                    system_prompt=system_prompt,
+                                    seed_goal=seed.goal,
+                                    depth=0,
+                                    execution_id=execution_id,
+                                    level_contexts=current_contexts,
+                                    sibling_acs=sibling_acs,
                                 )
-                            )
+                            except BaseException as e:
+                                # Never suppress anyio Cancelled — doing so breaks
+                                # the task group's cancel-scope propagation and can
+                                # cause the entire group to hang indefinitely.
+                                if isinstance(e, anyio.get_cancelled_exc_class()):
+                                    raise
+                                attempt_results[idx] = e
+
+                    async with anyio.create_task_group() as tg:
+                        for i, ac_idx in enumerate(pending_in_level):
+                            tg.start_soon(_run_ac, i, ac_idx)
+
+                    # Classify results: completed, failed, or stalled
+                    still_pending: list[int] = []
+
+                    for ac_idx, result in zip(pending_in_level, attempt_results, strict=True):
+                        if isinstance(result, BaseException):
+                            # Exception → permanent failure
                             level_result_map[ac_idx] = ACExecutionResult(
                                 ac_index=ac_idx,
                                 ac_content=seed.acceptance_criteria[ac_idx],
                                 success=False,
-                                error=(
-                                    f"Stalled after {MAX_STALL_RETRIES + 1} attempts "
-                                    f"(no activity for {STALL_TIMEOUT_SECONDS:.0f}s)"
-                                ),
+                                error=str(result),
                             )
+                        elif (
+                            isinstance(result, ACExecutionResult)
+                            and result.error == _STALL_SENTINEL
+                        ):
+                            # Stalled → retry if attempts remain
+                            if stall_attempt < MAX_STALL_RETRIES:
+                                still_pending.append(ac_idx)
+                                ac_id = f"ac_{ac_idx}"
+                                await self._safe_emit_event(
+                                    create_ac_stall_detected_event(
+                                        session_id=session_id,
+                                        ac_index=ac_idx,
+                                        ac_id=ac_id,
+                                        silent_seconds=STALL_TIMEOUT_SECONDS,
+                                        attempt=stall_attempt + 1,
+                                        max_attempts=MAX_STALL_RETRIES + 1,
+                                        action="restart",
+                                    )
+                                )
+                                log.warning(
+                                    "parallel_executor.supervisor.stall_retry",
+                                    session_id=session_id,
+                                    ac_index=ac_idx,
+                                    attempt=stall_attempt + 1,
+                                    max_retries=MAX_STALL_RETRIES,
+                                )
+                                self._console.print(
+                                    f"  [yellow]AC {ac_idx + 1}: Stall detected "
+                                    f"(attempt {stall_attempt + 1}/{MAX_STALL_RETRIES + 1}), "
+                                    f"retrying...[/yellow]"
+                                )
+                                self._flush_console()
+                            else:
+                                # Exhausted retries → permanent failure
+                                ac_id = f"ac_{ac_idx}"
+                                await self._safe_emit_event(
+                                    create_ac_stall_detected_event(
+                                        session_id=session_id,
+                                        ac_index=ac_idx,
+                                        ac_id=ac_id,
+                                        silent_seconds=STALL_TIMEOUT_SECONDS,
+                                        attempt=stall_attempt + 1,
+                                        max_attempts=MAX_STALL_RETRIES + 1,
+                                        action="abandon",
+                                    )
+                                )
+                                level_result_map[ac_idx] = ACExecutionResult(
+                                    ac_index=ac_idx,
+                                    ac_content=seed.acceptance_criteria[ac_idx],
+                                    success=False,
+                                    error=(
+                                        f"Stalled after {MAX_STALL_RETRIES + 1} attempts "
+                                        f"(no activity for {STALL_TIMEOUT_SECONDS:.0f}s)"
+                                    ),
+                                )
+                                log.error(
+                                    "parallel_executor.supervisor.stall_abandoned",
+                                    session_id=session_id,
+                                    ac_index=ac_idx,
+                                    total_attempts=MAX_STALL_RETRIES + 1,
+                                )
+                        else:
+                            # Normal completion (success or non-stall failure)
+                            level_result_map[ac_idx] = result
+
+                    pending_in_level = still_pending
+
+                # Process aggregated level results
+                level_success = 0
+                level_failed = 0
+
+                for ac_idx in executable:
+                    ac_result = level_result_map.get(ac_idx)
+                    if ac_result is None:
+                        ac_result = ACExecutionResult(
+                            ac_index=ac_idx,
+                            ac_content=seed.acceptance_criteria[ac_idx],
+                            success=False,
+                            error="No result produced",
+                        )
+
+                    if ac_result.success:
+                        level_success += 1
+                        ac_statuses[ac_idx] = "completed"
+                        completed_count += 1
+                    else:
+                        failed_indices.add(ac_idx)
+                        level_failed += 1
+                        ac_statuses[ac_idx] = "failed"
+
+                        if ac_result.error and ac_result.error != _STALL_SENTINEL:
                             log.error(
-                                "parallel_executor.supervisor.stall_abandoned",
+                                "parallel_executor.ac.exception",
                                 session_id=session_id,
                                 ac_index=ac_idx,
-                                total_attempts=MAX_STALL_RETRIES + 1,
+                                error=ac_result.error,
                             )
-                    else:
-                        # Normal completion (success or non-stall failure)
-                        level_result_map[ac_idx] = result
 
-                pending_in_level = still_pending
+                    all_results.append(ac_result)
 
-            # Process aggregated level results
-            level_success = 0
-            level_failed = 0
+                # Emit level completed event
+                await self._emit_level_completed(
+                    session_id=session_id,
+                    level=level_num,
+                    success_count=level_success,
+                    failure_count=level_failed,
+                )
 
-            for ac_idx in executable:
-                ac_result = level_result_map.get(ac_idx)
-                if ac_result is None:
-                    ac_result = ACExecutionResult(
-                        ac_index=ac_idx,
-                        ac_content=seed.acceptance_criteria[ac_idx],
-                        success=False,
-                        error="No result produced",
-                    )
+                # Emit progress after level completes
+                await self._emit_workflow_progress(
+                    session_id=session_id,
+                    execution_id=execution_id,
+                    seed=seed,
+                    ac_statuses=ac_statuses,
+                    executing_indices=[],
+                    completed_count=completed_count,
+                    current_level=level_num,
+                    total_levels=total_levels,
+                    activity=f"Level {level_num} complete",
+                )
 
-                if ac_result.success:
-                    level_success += 1
-                    ac_statuses[ac_idx] = "completed"
-                    completed_count += 1
-                else:
-                    failed_indices.add(ac_idx)
-                    level_failed += 1
-                    ac_statuses[ac_idx] = "failed"
+                self._console.print(
+                    f"[green]Level {level_num} complete: "
+                    f"{level_success} succeeded, {level_failed} failed[/green]"
+                )
+                self._flush_console()
 
-                    if ac_result.error and ac_result.error != _STALL_SENTINEL:
-                        log.error(
-                            "parallel_executor.ac.exception",
-                            session_id=session_id,
-                            ac_index=ac_idx,
-                            error=ac_result.error,
+                # Extract context from this level for next level's ACs
+                if level_success > 0:
+                    level_ac_data = []
+                    for r in all_results:
+                        if not isinstance(r, ACExecutionResult) or r.ac_index not in executable:
+                            continue
+                        if r.is_decomposed and r.sub_results:
+                            # Merge sub-result messages so context sees actual work
+                            merged_msgs = tuple(m for sr in r.sub_results for m in sr.messages)
+                            merged_final = r.final_message or "; ".join(
+                                sr.final_message for sr in r.sub_results if sr.final_message
+                            )
+                            level_ac_data.append(
+                                (
+                                    r.ac_index,
+                                    r.ac_content,
+                                    r.success,
+                                    merged_msgs,
+                                    merged_final,
+                                )
+                            )
+                        else:
+                            level_ac_data.append(
+                                (
+                                    r.ac_index,
+                                    r.ac_content,
+                                    r.success,
+                                    r.messages,
+                                    r.final_message,
+                                )
+                            )
+                    level_ctx = extract_level_context(level_ac_data, level_num)
+
+                    # Coordinator: detect and resolve file conflicts (Approach A)
+                    level_ac_results = [
+                        r
+                        for r in all_results
+                        if isinstance(r, ACExecutionResult) and r.ac_index in executable
+                    ]
+                    conflicts = self._coordinator.detect_file_conflicts(level_ac_results)
+
+                    if conflicts:
+                        self._console.print(
+                            f"  [yellow]Coordinator: {len(conflicts)} file conflict(s) "
+                            f"detected, starting review...[/yellow]"
+                        )
+                        review = await self._coordinator.run_review(
+                            conflicts=conflicts,
+                            level_context=level_ctx,
+                            level_number=level_num,
+                        )
+                        # Attach review to the level context
+                        level_ctx = LevelContext(
+                            level_number=level_ctx.level_number,
+                            completed_acs=level_ctx.completed_acs,
+                            coordinator_review=review,
+                        )
+                        self._console.print(
+                            f"  [green]Coordinator review complete: "
+                            f"{len(review.fixes_applied)} fix(es), "
+                            f"{len(review.warnings_for_next_level)} warning(s)[/green]"
                         )
 
-                all_results.append(ac_result)
+                    level_contexts.append(level_ctx)
 
-            # Emit level completed event
-            await self._emit_level_completed(
-                session_id=session_id,
-                level=level_num,
-                success_count=level_success,
-                failure_count=level_failed,
-            )
+                # RC3: Save checkpoint after each level completion
+                if self._checkpoint_store:
+                    try:
+                        from ouroboros.persistence.checkpoint import CheckpointData
 
-            # Emit progress after level completes
-            await self._emit_workflow_progress(
-                session_id=session_id,
-                execution_id=execution_id,
-                seed=seed,
-                ac_statuses=ac_statuses,
-                executing_indices=[],
-                completed_count=completed_count,
-                current_level=level_num,
-                total_levels=total_levels,
-                activity=f"Level {level_num} complete",
-            )
-
-            self._console.print(
-                f"[green]Level {level_num} complete: "
-                f"{level_success} succeeded, {level_failed} failed[/green]"
-            )
-            self._flush_console()
-
-            # Extract context from this level for next level's ACs
-            if level_success > 0:
-                level_ac_data = []
-                for r in all_results:
-                    if not isinstance(r, ACExecutionResult) or r.ac_index not in executable:
-                        continue
-                    if r.is_decomposed and r.sub_results:
-                        # Merge sub-result messages so context sees actual work
-                        merged_msgs = tuple(m for sr in r.sub_results for m in sr.messages)
-                        merged_final = r.final_message or "; ".join(
-                            sr.final_message for sr in r.sub_results if sr.final_message
+                        seed_id = getattr(seed, "id", session_id)
+                        checkpoint = CheckpointData.create(
+                            seed_id=seed_id,
+                            phase="parallel_execution",
+                            state={
+                                "session_id": session_id,
+                                "execution_id": execution_id,
+                                "completed_levels": level_idx + 1,
+                                "ac_statuses": {str(k): v for k, v in ac_statuses.items()},
+                                "failed_indices": sorted(failed_indices),
+                                "completed_count": completed_count,
+                                "level_contexts": serialize_level_contexts(level_contexts),
+                            },
                         )
-                        level_ac_data.append(
-                            (r.ac_index, r.ac_content, r.success, merged_msgs, merged_final)
+                        save_result = self._checkpoint_store.save(checkpoint)
+                        if hasattr(save_result, "is_ok") and save_result.is_ok:
+                            log.info(
+                                "parallel_executor.checkpoint.saved",
+                                level=level_num,
+                                seed_id=seed_id,
+                            )
+                        else:
+                            err_msg = (
+                                str(save_result.error)
+                                if hasattr(save_result, "error")
+                                else "unknown error"
+                            )
+                            log.warning(
+                                "parallel_executor.checkpoint.save_failed",
+                                level=level_num,
+                                seed_id=seed_id,
+                                error=err_msg,
+                            )
+                            self._console.print(
+                                f"  [yellow]Checkpoint save failed for level "
+                                f"{level_num}: {err_msg}[/yellow]"
+                            )
+                    except Exception as e:
+                        log.warning(
+                            "parallel_executor.checkpoint.save_failed",
+                            level=level_num,
+                            error=str(e),
                         )
-                    else:
-                        level_ac_data.append(
-                            (r.ac_index, r.ac_content, r.success, r.messages, r.final_message)
-                        )
-                level_ctx = extract_level_context(level_ac_data, level_num)
 
-                # Coordinator: detect and resolve file conflicts (Approach A)
-                level_ac_results = [
-                    r
-                    for r in all_results
-                    if isinstance(r, ACExecutionResult) and r.ac_index in executable
-                ]
-                conflicts = self._coordinator.detect_file_conflicts(level_ac_results)
-
-                if conflicts:
-                    self._console.print(
-                        f"  [yellow]Coordinator: {len(conflicts)} file conflict(s) detected, "
-                        f"starting review...[/yellow]"
-                    )
-                    review = await self._coordinator.run_review(
-                        conflicts=conflicts,
-                        level_context=level_ctx,
-                        level_number=level_num,
-                    )
-                    # Attach review to the level context
-                    level_ctx = LevelContext(
-                        level_number=level_ctx.level_number,
-                        completed_acs=level_ctx.completed_acs,
-                        coordinator_review=review,
-                    )
-                    self._console.print(
-                        f"  [green]Coordinator review complete: "
-                        f"{len(review.fixes_applied)} fix(es), "
-                        f"{len(review.warnings_for_next_level)} warning(s)[/green]"
-                    )
-
-                level_contexts.append(level_ctx)
-
-            # RC3: Save checkpoint after each level completion
-            if self._checkpoint_store:
-                try:
-                    from ouroboros.persistence.checkpoint import CheckpointData
-
-                    seed_id = getattr(seed, "id", session_id)
-                    checkpoint = CheckpointData.create(
-                        seed_id=seed_id,
-                        phase="parallel_execution",
-                        state={
-                            "session_id": session_id,
-                            "execution_id": execution_id,
-                            "completed_levels": level_idx + 1,
-                            "ac_statuses": {str(k): v for k, v in ac_statuses.items()},
-                            "failed_indices": sorted(failed_indices),
-                            "completed_count": completed_count,
-                            "level_contexts": serialize_level_contexts(level_contexts),
-                        },
-                    )
-                    self._checkpoint_store.save(checkpoint)
-                    log.info(
-                        "parallel_executor.checkpoint.saved",
-                        level=level_num,
-                        seed_id=seed_id,
-                    )
-                except Exception as e:
-                    log.warning(
-                        "parallel_executor.checkpoint.save_failed",
-                        level=level_num,
-                        error=str(e),
-                    )
+            # All levels done — cancel the background progress emitter
+            outer_tg.cancel_scope.cancel()
 
         # Aggregate results - sort by AC index for consistent ordering
         sorted_results = sorted(all_results, key=lambda r: r.ac_index)
@@ -1464,6 +1520,7 @@ When complete, explicitly state: [TASK_COMPLETE]
         execution_id: str,
         seed: Seed,
         ac_statuses: dict[int, str],
+        progress_state: dict[str, int],
         interval: float = 15.0,
         max_consecutive_errors: int = 5,
     ) -> None:
@@ -1472,12 +1529,15 @@ When complete, explicitly state: [TASK_COMPLETE]
         Runs as a background task inside a task group. Terminates when:
         - All ACs are in terminal state (RC4: no stale monitoring)
         - Consecutive errors exceed threshold (RC2: graceful degradation)
+        - Task group cancel scope triggers (execution loop finished)
 
         Args:
             session_id: Session ID.
             execution_id: Execution ID.
             seed: Seed specification.
             ac_statuses: Shared dict of AC statuses (mutated externally).
+            progress_state: Shared dict with ``current_level`` and ``total_levels``
+                keys, mutated by the main execution loop.
             interval: Seconds between emissions.
             max_consecutive_errors: Stop after this many consecutive failures.
         """
@@ -1500,8 +1560,8 @@ When complete, explicitly state: [TASK_COMPLETE]
                     ac_statuses=ac_statuses,
                     executing_indices=[i for i, s in ac_statuses.items() if s == "executing"],
                     completed_count=sum(1 for s in ac_statuses.values() if s == "completed"),
-                    current_level=0,
-                    total_levels=0,
+                    current_level=progress_state.get("current_level", 0),
+                    total_levels=progress_state.get("total_levels", 0),
                     activity="Monitoring",
                 )
                 consecutive_errors = 0
