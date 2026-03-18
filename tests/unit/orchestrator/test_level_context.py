@@ -188,6 +188,35 @@ class TestBuildContextPrompt:
         ]
         assert build_context_prompt(contexts) == ""
 
+    def test_build_context_prompt_with_coordinator_review_no_successes(self) -> None:
+        """Test coordinator review is preserved even when no ACs succeeded."""
+        review = CoordinatorReview(
+            level_number=0,
+            conflicts_detected=(),
+            review_summary="Merge conflict detected in shared.py",
+            fixes_applied=("resolved import ordering",),
+            warnings_for_next_level=("watch for circular imports",),
+            duration_seconds=1.0,
+            session_id="sess_review",
+        )
+        contexts = [
+            LevelContext(
+                level_number=0,
+                completed_acs=(
+                    ACContextSummary(ac_index=0, ac_content="Failed AC", success=False),
+                ),
+                coordinator_review=review,
+            ),
+        ]
+        prompt = build_context_prompt(contexts)
+        assert prompt != ""
+        assert "Coordinator Review" in prompt
+        assert "Merge conflict detected" in prompt
+        assert "resolved import ordering" in prompt
+        assert "watch for circular imports" in prompt
+        # Should NOT contain "Previous Work Context" since no ACs succeeded
+        assert "Previous Work Context" not in prompt
+
 
 class TestExtractLevelContext:
     """Tests for extract_level_context function."""
@@ -262,6 +291,31 @@ class TestExtractLevelContext:
         assert ctx.completed_acs[0].success is True
         assert ctx.completed_acs[1].success is False
         assert ctx.completed_acs[2].success is True
+
+    def test_extract_notebook_edit_file_tracking(self) -> None:
+        """Test that NotebookEdit file paths are tracked alongside Write/Edit."""
+        messages = (
+            AgentMessage(
+                type="tool",
+                content="",
+                tool_name="NotebookEdit",
+                data={"tool_input": {"file_path": "notebooks/analysis.ipynb"}},
+            ),
+            AgentMessage(
+                type="tool",
+                content="",
+                tool_name="Write",
+                data={"tool_input": {"file_path": "src/main.py"}},
+            ),
+        )
+        results = [
+            (0, "Update notebook and code", True, messages, "Done"),
+        ]
+        ctx = extract_level_context(results, level_num=0)
+        summary = ctx.completed_acs[0]
+        assert "notebooks/analysis.ipynb" in summary.files_modified
+        assert "src/main.py" in summary.files_modified
+        assert "NotebookEdit" in summary.tools_used
 
 
 class TestLevelContextSerialization:

@@ -113,14 +113,17 @@ def build_context_prompt(level_contexts: list[LevelContext]) -> str:
         if text:
             sections.append(text)
 
-    if not sections:
+    has_reviews = any(ctx.coordinator_review for ctx in level_contexts)
+    if not sections and not has_reviews:
         return ""
 
-    result = (
-        "\n## Previous Work Context\n"
-        "The following ACs have already been completed. "
-        "Use this context to inform your work.\n\n" + "\n\n".join(sections) + "\n"
-    )
+    result = ""
+    if sections:
+        result = (
+            "\n## Previous Work Context\n"
+            "The following ACs have already been completed. "
+            "Use this context to inform your work.\n\n" + "\n\n".join(sections) + "\n"
+        )
 
     # Append coordinator review warnings if present
     for ctx in level_contexts:
@@ -173,7 +176,7 @@ def extract_level_context(
             if msg.tool_name:
                 tools_used.add(msg.tool_name)
                 # Extract file paths from Write/Edit tool inputs
-                if msg.tool_name in ("Write", "Edit"):
+                if msg.tool_name in ("Write", "Edit", "NotebookEdit"):
                     tool_input = msg.data.get("tool_input", {})
                     file_path = tool_input.get("file_path")
                     if file_path:

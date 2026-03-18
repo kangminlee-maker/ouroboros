@@ -327,6 +327,26 @@ class ParallelACExecutor:
                             seed_id=seed_id,
                             restored_contexts=len(level_contexts),
                         )
+                        # Reconstruct all_results for completed/failed/skipped ACs
+                        for prev_level in dependency_graph.execution_levels[:resume_from_level]:
+                            for ac_idx in prev_level:
+                                if ac_idx >= total_acs:
+                                    continue
+                                status = ac_statuses.get(ac_idx, "pending")
+                                all_results.append(
+                                    ACExecutionResult(
+                                        ac_index=ac_idx,
+                                        ac_content=seed.acceptance_criteria[ac_idx],
+                                        success=(status == "completed"),
+                                        error=(
+                                            "Skipped: dependency failed"
+                                            if status == "skipped"
+                                            else None
+                                            if status == "completed"
+                                            else "Failed (restored from checkpoint)"
+                                        ),
+                                    )
+                                )
                         self._console.print(
                             f"[cyan]Resuming from level {resume_from_level + 1} "
                             f"(checkpoint recovered, "
@@ -385,8 +405,8 @@ class ParallelACExecutor:
             seed=seed,
             ac_statuses=ac_statuses,
             executing_indices=[],
-            completed_count=0,
-            current_level=1,
+            completed_count=completed_count,
+            current_level=resume_from_level + 1,
             total_levels=total_levels,
             activity="Starting parallel execution",
         )
@@ -666,11 +686,23 @@ class ParallelACExecutor:
 
             # Extract context from this level for next level's ACs
             if level_success > 0:
-                level_ac_data = [
-                    (r.ac_index, r.ac_content, r.success, r.messages, r.final_message)
-                    for r in all_results
-                    if isinstance(r, ACExecutionResult) and r.ac_index in executable
-                ]
+                level_ac_data = []
+                for r in all_results:
+                    if not isinstance(r, ACExecutionResult) or r.ac_index not in executable:
+                        continue
+                    if r.is_decomposed and r.sub_results:
+                        # Merge sub-result messages so context sees actual work
+                        merged_msgs = tuple(m for sr in r.sub_results for m in sr.messages)
+                        merged_final = r.final_message or "; ".join(
+                            sr.final_message for sr in r.sub_results if sr.final_message
+                        )
+                        level_ac_data.append(
+                            (r.ac_index, r.ac_content, r.success, merged_msgs, merged_final)
+                        )
+                    else:
+                        level_ac_data.append(
+                            (r.ac_index, r.ac_content, r.success, r.messages, r.final_message)
+                        )
                 level_ctx = extract_level_context(level_ac_data, level_num)
 
                 # Coordinator: detect and resolve file conflicts (Approach A)
@@ -1022,20 +1054,42 @@ Respond with either "ATOMIC" or the JSON array only, nothing else.
                     status="executing",
                 )
 
-                sub_results[idx] = await self._execute_atomic_ac(
-                    ac_index=parent_ac_index * 100 + idx,
-                    ac_content=sub_ac,
-                    session_id=session_id,
-                    tools=tools,
-                    system_prompt=system_prompt,
-                    seed_goal=seed_goal,
-                    depth=depth,
-                    start_time=datetime.now(UTC),
-                    is_sub_ac=True,
-                    parent_ac_index=parent_ac_index,
-                    sub_ac_index=idx,
-                    level_contexts=level_contexts,
-                )
+                result = None
+                for attempt in range(MAX_STALL_RETRIES + 1):
+                    result = await self._execute_atomic_ac(
+                        ac_index=parent_ac_index * 100 + idx,
+                        ac_content=sub_ac,
+                        session_id=session_id,
+                        tools=tools,
+                        system_prompt=system_prompt,
+                        seed_goal=seed_goal,
+                        depth=depth,
+                        start_time=datetime.now(UTC),
+                        is_sub_ac=True,
+                        parent_ac_index=parent_ac_index,
+                        sub_ac_index=idx,
+                        level_contexts=level_contexts,
+                    )
+                    if (
+                        isinstance(result, ACExecutionResult)
+                        and result.error == _STALL_SENTINEL
+                        and attempt < MAX_STALL_RETRIES
+                    ):
+                        log.warning(
+                            "parallel_executor.sub_ac.stall_retry",
+                            parent_ac=parent_ac_index,
+                            sub_ac=idx,
+                            attempt=attempt + 1,
+                            max_retries=MAX_STALL_RETRIES,
+                        )
+                        self._console.print(
+                            f"    [yellow]Sub-AC {idx + 1}: Stall detected "
+                            f"(attempt {attempt + 1}/{MAX_STALL_RETRIES + 1}), "
+                            f"retrying...[/yellow]"
+                        )
+                        continue
+                    break
+                sub_results[idx] = result
             except BaseException as e:
                 if isinstance(e, anyio.get_cancelled_exc_class()):
                     raise
