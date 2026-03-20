@@ -1,17 +1,11 @@
-"""Ouroboros core module - shared types, errors, and protocols."""
+"""Ouroboros core module - shared types, errors, and protocols.
 
-from ouroboros.core.context import (
-    CompressionResult,
-    ContextMetrics,
-    FilteredContext,
-    WorkflowContext,
-    compress_context,
-    compress_context_with_llm,
-    count_context_tokens,
-    count_tokens,
-    create_filtered_context,
-    get_context_metrics,
-)
+Note: context.py (WorkflowContext, compress_context, etc.) is intentionally
+NOT re-exported here. It depends on providers/ (LiteLLMAdapter) which violates
+the core layer's position as the lowest dependency layer. Import directly from
+ouroboros.core.context when needed.
+"""
+
 from ouroboros.core.errors import (
     ConfigError,
     OuroborosError,
@@ -59,17 +53,6 @@ __all__ = [
     "OntologyField",
     "EvaluationPrinciple",
     "ExitCondition",
-    # Context Management
-    "WorkflowContext",
-    "ContextMetrics",
-    "CompressionResult",
-    "FilteredContext",
-    "count_tokens",
-    "count_context_tokens",
-    "get_context_metrics",
-    "compress_context",
-    "compress_context_with_llm",
-    "create_filtered_context",
     # Git Workflow
     "GitWorkflowConfig",
     "detect_git_workflow",

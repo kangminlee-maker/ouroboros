@@ -262,11 +262,26 @@ def get_question(question_type: OntologicalQuestionType) -> OntologicalQuestion:
 # ============================================================================
 
 
-def _get_ontology_analysis_system_prompt() -> str:
-    """Lazy-load ontology analysis system prompt to avoid import-time I/O."""
-    from ouroboros.agents.loader import load_agent_prompt
+_DEFAULT_SYSTEM_PROMPT = (
+    "You are an ontological analyst. Examine the provided context and identify "
+    "hidden assumptions, root causes, boundary conditions, and essential "
+    "relationships. Respond with a JSON object containing 'questions' (list of "
+    "ontological questions) and 'insights' (list of analysis insights)."
+)
 
-    return load_agent_prompt("ontology-analyst")
+
+def _get_ontology_analysis_system_prompt() -> str:
+    """Load ontology analysis system prompt.
+
+    Tries to load from agents/ontology-analyst.md if available,
+    falls back to built-in default prompt to avoid core -> agents dependency.
+    """
+    try:
+        from ouroboros.agents.loader import load_agent_prompt
+
+        return load_agent_prompt("ontology-analyst")
+    except (ImportError, FileNotFoundError, Exception):
+        return _DEFAULT_SYSTEM_PROMPT
 
 
 def _build_analysis_prompt(
