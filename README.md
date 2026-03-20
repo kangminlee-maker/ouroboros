@@ -244,9 +244,9 @@ Two mathematical gates, one philosophy: **don't build until you're clear (Ambigu
 
 ---
 
-## The Nine Minds
+## The Ten Minds
 
-Nine agents, each a different mode of thinking. Loaded on-demand, never preloaded:
+Ten agents, each a different mode of thinking. Loaded on-demand, never preloaded:
 
 | Agent | Role | Core Question |
 |:------|:-----|:--------------|
@@ -259,13 +259,14 @@ Nine agents, each a different mode of thinking. Loaded on-demand, never preloade
 | **Simplifier** | Removes complexity | *"What's the simplest thing that could work?"* |
 | **Researcher** | Stops coding, starts investigating | *"What evidence do we actually have?"* |
 | **Architect** | Identifies structural causes | *"If we started over, would we build it this way?"* |
+| **QA Judge** | Quality verdict on any artifact | *"Does this meet the acceptance criteria?"* |
 
 ---
 
 ## Under the Hood
 
 <details>
-<summary><strong>18 packages · 166 modules · 95 test files · Python 3.14+</strong></summary>
+<summary><strong>21 packages · 176 modules · 111 test files · Python 3.14+</strong></summary>
 
 ```
 src/ouroboros/
