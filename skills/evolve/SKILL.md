@@ -84,10 +84,10 @@ The Ouroboros MCP tools are often registered as **deferred tools** that must be 
 2. Display: generation count, ontology evolution, convergence progress
 
 **Rewinding:**
-1. Call `ouroboros_evolve_step` with:
-   - `lineage_id`: the lineage to continue from a rewind point
-   - `seed_content`: the seed YAML from the target generation
-   (Future: dedicated `ouroboros_evolve_rewind` tool)
+1. Call `ouroboros_evolve_rewind` with:
+   - `lineage_id`: the lineage to rewind
+   - `to_generation`: the generation number to rewind to
+2. After rewind, call `ouroboros_evolve_step` with the same `lineage_id` to continue evolution from the rewind point
 
 ### Path B: Plugin-only (no MCP tools available)
 

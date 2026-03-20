@@ -1,5 +1,7 @@
 # Ouroboros - Development Environment
 
+domain: software-engineering
+
 > This CLAUDE.md is for **local development only**. End users install via:
 > ```
 > claude plugin marketplace add Q00/ouroboros
