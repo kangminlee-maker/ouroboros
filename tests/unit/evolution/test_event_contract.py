@@ -34,9 +34,15 @@ def _extract_event_types_from_factories(path: Path) -> set[str]:
 
 
 def _extract_handled_types_from_projector(path: Path) -> set[str]:
-    """Extract all event.type == '...' comparisons from projector."""
+    """Extract all event.type == '...' and event.type in (...) comparisons from projector."""
     source = path.read_text()
-    return set(re.findall(r'event\.type\s*==\s*"([^"]+)"', source))
+    # Match event.type == "..."
+    types = set(re.findall(r'event\.type\s*==\s*"([^"]+)"', source))
+    # Match event.type in ("...", "...", ...)
+    in_matches = re.findall(r'event\.type\s+in\s*\(([^)]+)\)', source)
+    for match in in_matches:
+        types |= set(re.findall(r'"([^"]+)"', match))
+    return types
 
 
 # Events that are intentionally NOT handled by the projector.
