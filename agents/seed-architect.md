@@ -30,6 +30,18 @@ The data structure/domain model for this work:
 
 Field types should be one of: string, number, boolean, array, object
 
+<!-- sentinel:START — Relationship and state transition guidance (not in upstream) -->
+When defining ONTOLOGY_FIELDS, enrich descriptions with:
+- **Relationships**: If a field references another entity, note the relationship type.
+  Example: "project_id:string:ID of the parent project (N tasks to 1 project)"
+- **State transitions**: If an entity has lifecycle states, include a status field
+  with valid transitions in the description.
+  Example: "status:string:Task lifecycle (created → in_progress → done / cancelled)"
+  Use → for transitions, / for branches, parentheses for grouping.
+
+These are optional — omit if the domain has no entity relationships or state changes.
+<!-- sentinel:END -->
+
 ### 5. EVALUATION_PRINCIPLES
 Principles for evaluating output quality.
 Format: name:description:weight (pipe-separated, weight 0.0-1.0)
