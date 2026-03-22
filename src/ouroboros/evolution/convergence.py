@@ -68,6 +68,8 @@ class ConvergenceCriteria:
     ac_min_pass_ratio: float = 1.0  # for "ratio" mode
     regression_gate_enabled: bool = True
     validation_gate_enabled: bool = True
+    ontology_completeness_gate_enabled: bool = False
+    ontology_min_fields: int = 3
 
     def evaluate(
         self,
@@ -111,6 +113,23 @@ class ConvergenceCriteria:
         # Signal 1: Ontology stability (latest two generations)
         latest_sim = self._latest_similarity(lineage)
         if latest_sim >= self.convergence_threshold:
+            # Safety: if ontology has been stable for stagnation_window consecutive
+            # generations but gates keep blocking, force stagnation termination.
+            # Without this, gates (e.g., completeness) can block indefinitely
+            # since the stagnation check below only runs when similarity < threshold.
+            if self._check_stagnation(lineage):
+                return ConvergenceSignal(
+                    converged=True,
+                    reason=(
+                        f"Stagnation detected: ontology unchanged for "
+                        f"{self.stagnation_window} consecutive generations "
+                        f"(convergence gates could not be satisfied)"
+                    ),
+                    ontology_similarity=latest_sim,
+                    generation=current_gen,
+                    termination_reason=TerminationReason.STAGNATED,
+                )
+
             # Eval gate: block convergence if evaluation is unsatisfactory
             if self.eval_gate_enabled and latest_evaluation is not None:
                 eval_blocks = not latest_evaluation.final_approved or (
@@ -178,6 +197,17 @@ class ConvergenceCriteria:
                     ontology_similarity=latest_sim,
                     generation=current_gen,
                 )
+
+            # Ontology completeness gate: block convergence if ontology is structurally thin
+            if self.ontology_completeness_gate_enabled:
+                completeness_block = self._check_ontology_completeness(lineage)
+                if completeness_block is not None:
+                    return ConvergenceSignal(
+                        converged=False,
+                        reason=completeness_block,
+                        ontology_similarity=latest_sim,
+                        generation=current_gen,
+                    )
 
             # Validation gate: block convergence if validation was skipped or failed
             if self.validation_gate_enabled and validation_output:
@@ -315,6 +345,40 @@ class ConvergenceCriteria:
                 return failed, (
                     f"Per-AC gate (mode=ratio): pass ratio {ratio:.2f} "
                     f"< required {self.ac_min_pass_ratio:.2f}"
+                )
+
+        return None
+
+    def _check_ontology_completeness(self, lineage: OntologyLineage) -> str | None:
+        """Check if ontology meets minimum structural completeness.
+
+        Returns blocking reason if incomplete, None if OK.
+        Checks: (1) minimum field count, (2) description quality.
+        """
+        if not lineage.generations:
+            return None
+
+        ontology = lineage.generations[-1].ontology_snapshot
+
+        # Check 1: Minimum field count
+        if self.ontology_min_fields > 0 and len(ontology.fields) < self.ontology_min_fields:
+            return (
+                f"Ontology completeness gate: {len(ontology.fields)} fields "
+                f"(minimum {self.ontology_min_fields} required)"
+            )
+
+        # Check 2: Trivially short or name-echoing descriptions
+        if ontology.fields:
+            trivial_count = sum(
+                1
+                for f in ontology.fields
+                if len(f.description.strip()) < 10
+                or f.description.strip().lower() == f.name.strip().lower()
+            )
+            if trivial_count > len(ontology.fields) // 2:
+                return (
+                    f"Ontology completeness gate: {trivial_count}/{len(ontology.fields)} "
+                    f"fields have trivial descriptions"
                 )
 
         return None
