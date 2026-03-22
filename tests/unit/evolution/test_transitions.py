@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from ouroboros.core.lineage import LineageStatus
+from ouroboros.core.lineage import LineageStatus, TerminationReason
 from ouroboros.evolution.transitions import (
     ALLOWED_TRANSITIONS,
     TERMINAL_EVENT_STATUS,
@@ -166,5 +166,46 @@ class TestAbortedTransitions:
 class TestUnknownStatus:
     def test_unknown_status_returns_false(self) -> None:
         """A status not in ALLOWED_TRANSITIONS defaults to rejection."""
-        # Simulate by checking the function logic directly
         assert not is_transition_allowed(LineageStatus.ACTIVE, "totally.unknown.event")
+
+
+# --- TerminationReason exhaustiveness ---
+
+
+class TestTerminationReasonExhaustiveness:
+    """Every TerminationReason member must be explicitly handled in _emit_termination."""
+
+    # The known groupings in loop.py _emit_termination():
+    _EXHAUSTED_GROUP = {TerminationReason.EXHAUSTED}
+    _STAGNATED_GROUP = {
+        TerminationReason.STAGNATED,
+        TerminationReason.OSCILLATED,
+        TerminationReason.REPETITIVE,
+    }
+    _CONVERGED_GROUP = {TerminationReason.CONVERGED}
+
+    def test_all_members_are_in_a_group(self) -> None:
+        """Every TerminationReason member must belong to exactly one dispatch group."""
+        all_grouped = self._EXHAUSTED_GROUP | self._STAGNATED_GROUP | self._CONVERGED_GROUP
+        for member in TerminationReason:
+            assert member in all_grouped, (
+                f"TerminationReason.{member.name} is not in any dispatch group in "
+                f"_emit_termination(). Add it to the appropriate group."
+            )
+
+    def test_no_group_overlap(self) -> None:
+        """Dispatch groups must not overlap."""
+        groups = [self._EXHAUSTED_GROUP, self._STAGNATED_GROUP, self._CONVERGED_GROUP]
+        for i, a in enumerate(groups):
+            for b in groups[i + 1 :]:
+                overlap = a & b
+                assert not overlap, f"Dispatch groups overlap: {overlap}"
+
+    def test_groups_cover_all_members(self) -> None:
+        """Union of all groups equals the full enum."""
+        all_grouped = self._EXHAUSTED_GROUP | self._STAGNATED_GROUP | self._CONVERGED_GROUP
+        all_members = set(TerminationReason)
+        assert all_grouped == all_members, (
+            f"Groups missing: {all_members - all_grouped}, "
+            f"Extra in groups: {all_grouped - all_members}"
+        )

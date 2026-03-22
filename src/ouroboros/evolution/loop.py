@@ -631,7 +631,27 @@ class EvolutionaryLoop:
             )
             return lineage.with_status(LineageStatus.CONVERGED, termination_reason=tr)
 
-        # Default: CONVERGED (ontology stable)
+        if tr == TerminationReason.CONVERGED:
+            await self._guard.gated_append(
+                lineage_converged(
+                    lineage.lineage_id,
+                    generation_number,
+                    signal.reason,
+                    signal.ontology_similarity,
+                    termination_reason=str(tr),
+                )
+            )
+            return lineage.with_status(LineageStatus.CONVERGED, termination_reason=tr)
+
+        # Defensive: unknown TerminationReason falls back to CONVERGED with warning
+        logger.warning(
+            "evolution.termination.unknown_reason",
+            extra={
+                "termination_reason": str(tr),
+                "lineage_id": lineage.lineage_id,
+                "generation": generation_number,
+            },
+        )
         await self._guard.gated_append(
             lineage_converged(
                 lineage.lineage_id,
@@ -661,6 +681,7 @@ class EvolutionaryLoop:
             TerminationReason.REPETITIVE,
         ):
             return lineage, StepAction.STAGNATED
+        # CONVERGED or unknown
         return lineage, StepAction.CONVERGED
 
     async def _run_generation(
