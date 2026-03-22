@@ -55,7 +55,7 @@ NEW_AGENTS = [
 ALL_AGENTS = ORIGINAL_AGENTS + NEW_AGENTS
 
 # Personas with structured data (YOUR APPROACH + YOUR QUESTIONS)
-# Note: ontologist uses a different structure (THE FOUR FUNDAMENTAL QUESTIONS)
+# Note: ontologist uses a different structure (THE FIVE FUNDAMENTAL QUESTIONS)
 PERSONA_AGENTS = [
     "hacker",
     "contrarian",

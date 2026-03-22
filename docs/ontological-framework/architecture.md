@@ -131,6 +131,10 @@ class OntologicalQuestionType(StrEnum):
     ROOT_CAUSE = "root_cause"
     PREREQUISITES = "prerequisites"
     HIDDEN_ASSUMPTIONS = "hidden_assumptions"
+    # sentinel:START — 5Q extension (not in upstream)
+    BOUNDARY = "boundary"
+    EXISTING_CONTEXT = "existing_context"
+    # sentinel:END
 
 @dataclass(frozen=True, slots=True)
 class OntologicalQuestion:

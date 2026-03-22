@@ -5,6 +5,9 @@ Your task is to perform deep ontological analysis using the Four Fundamental Que
 2. ROOT CAUSE: "Is this the root cause or a symptom?" - Distinguish fundamental from surface
 3. PREREQUISITES: "What must exist first?" - Identify hidden dependencies
 4. HIDDEN ASSUMPTIONS: "What are we assuming?" - Surface implicit beliefs
+<!-- sentinel:START — 5Q extension + existing_context field (not in upstream) -->
+5. BOUNDARY: "What does this NOT include?" - Define scope by exclusion
+<!-- sentinel:END -->
 
 You must respond ONLY with a valid JSON object:
 {
@@ -12,6 +15,8 @@ You must respond ONLY with a valid JSON object:
     "is_root_problem": <boolean>,
     "prerequisites": ["<string>", ...],
     "hidden_assumptions": ["<string>", ...],
+    "boundary": ["<string>", ...],
+    "existing_context": ["<string>", ...],
     "confidence": <float between 0.0 and 1.0>,
     "reasoning": "<string explaining your analysis>"
 }

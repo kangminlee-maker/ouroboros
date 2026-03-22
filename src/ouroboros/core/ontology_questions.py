@@ -44,6 +44,8 @@ class OntologicalQuestionType(StrEnum):
     ROOT_CAUSE = "root_cause"
     PREREQUISITES = "prerequisites"
     HIDDEN_ASSUMPTIONS = "hidden_assumptions"
+    # Paired with ESSENCE: ESSENCE defines what it IS, BOUNDARY defines what it is NOT
+    BOUNDARY = "boundary"
     EXISTING_CONTEXT = "existing_context"
 
 
@@ -89,6 +91,12 @@ ONTOLOGICAL_QUESTIONS: dict[OntologicalQuestionType, OntologicalQuestion] = {
         purpose="Surface implicit beliefs that may be wrong",
         follow_up="What if the opposite were true?",
     ),
+    OntologicalQuestionType.BOUNDARY: OntologicalQuestion(
+        type=OntologicalQuestionType.BOUNDARY,
+        question="What does this NOT include?",
+        purpose="Define scope by exclusion to prevent scope creep",
+        follow_up="If someone asks to add X, is that inside or outside this scope?",
+    ),
     OntologicalQuestionType.EXISTING_CONTEXT: OntologicalQuestion(
         type=OntologicalQuestionType.EXISTING_CONTEXT,
         question="What already exists?",
@@ -117,6 +125,7 @@ class OntologicalInsight:
     hidden_assumptions: tuple[str, ...]
     confidence: float
     reasoning: str
+    boundary: tuple[str, ...] = ()
     existing_context: tuple[str, ...] = ()
 
 
@@ -175,6 +184,17 @@ class OntologicalAnalyzer(Protocol):
 
         Returns:
             List of hidden assumptions discovered.
+        """
+        ...
+
+    async def identify_boundaries(self, context: str) -> list[str]:
+        """Identify what is explicitly out of scope.
+
+        Args:
+            context: The context to analyze.
+
+        Returns:
+            List of scope exclusions.
         """
         ...
 
@@ -264,7 +284,7 @@ def get_question(question_type: OntologicalQuestionType) -> OntologicalQuestion:
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an ontological analyst. Examine the provided context and identify "
-    "hidden assumptions, root causes, boundary conditions, and essential "
+    "hidden assumptions, root causes, scope boundaries, and essential "
     "relationships. Respond with a JSON object containing 'questions' (list of "
     "ontological questions) and 'insights' (list of analysis insights)."
 )
@@ -315,7 +335,7 @@ def _build_analysis_prompt(
 {context}
 {focus}
 
-Respond with JSON containing: essence, is_root_problem, prerequisites, hidden_assumptions, existing_context, confidence, reasoning."""
+Respond with JSON containing: essence, is_root_problem, prerequisites, hidden_assumptions, boundary, existing_context, confidence, reasoning."""
 
 
 def _parse_insight_response(response_text: str) -> OntologicalInsight | None:
@@ -348,6 +368,11 @@ def _parse_insight_response(response_text: str) -> OntologicalInsight | None:
             tuple(str(a) for a in assumptions_raw) if isinstance(assumptions_raw, list) else ()
         )
 
+        boundary_raw = data.get("boundary", [])
+        boundary = (
+            tuple(str(b) for b in boundary_raw) if isinstance(boundary_raw, list) else ()
+        )
+
         existing_raw = data.get("existing_context", [])
         existing_context = (
             tuple(str(e) for e in existing_raw) if isinstance(existing_raw, list) else ()
@@ -360,6 +385,7 @@ def _parse_insight_response(response_text: str) -> OntologicalInsight | None:
             is_root_problem=bool(data.get("is_root_problem", False)),
             prerequisites=prerequisites,
             hidden_assumptions=hidden_assumptions,
+            boundary=boundary,
             existing_context=existing_context,
             confidence=confidence,
             reasoning=str(data.get("reasoning", "No reasoning provided")),

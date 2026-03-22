@@ -30,6 +30,9 @@
 ```python
 # 구현된 내용:
 - OntologicalQuestionType (enum): ESSENCE, ROOT_CAUSE, PREREQUISITES, HIDDEN_ASSUMPTIONS
+<!-- sentinel:START — 5Q extension (not in upstream) -->
+  + BOUNDARY (scope exclusion), EXISTING_CONTEXT (brownfield context)
+<!-- sentinel:END -->
 - OntologicalQuestion (frozen dataclass): question, purpose, follow_up
 - ONTOLOGICAL_QUESTIONS (dict): 4개 핵심 질문 정의
 - OntologicalInsight (frozen dataclass): 분석 결과 타입

@@ -94,7 +94,11 @@ ONTOLOGICAL_QUESTIONS = {
     "essence": "What IS this, really?",
     "root_cause": "Is this the root cause or a symptom?",
     "prerequisites": "What must exist first?",
-    "hidden_assumptions": "What are we assuming?"
+    "hidden_assumptions": "What are we assuming?",
+    # sentinel:START — 5Q extension (not in upstream)
+    "boundary": "What does this NOT include?",
+    "existing_context": "What already exists?",
+    # sentinel:END
 }
 ```
 
