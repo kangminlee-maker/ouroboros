@@ -117,10 +117,10 @@ class TestExecuteSeedHandlerQA:
         mock_runner.execute_seed = AsyncMock(return_value=Result.ok(fake_exec))
 
         with (
-            patch("ouroboros.mcp.tools.definitions.ClaudeAgentAdapter"),
-            patch("ouroboros.mcp.tools.definitions.EventStore") as mock_es_cls,
+            patch("ouroboros.mcp.tools.handlers.execution.ClaudeAgentAdapter"),
+            patch("ouroboros.mcp.tools.handlers.execution.EventStore") as mock_es_cls,
             patch(
-                "ouroboros.mcp.tools.definitions.OrchestratorRunner",
+                "ouroboros.mcp.tools.handlers.execution.OrchestratorRunner",
                 return_value=mock_runner,
             ),
             patch(
@@ -161,10 +161,10 @@ class TestExecuteSeedHandlerQA:
         mock_runner.execute_seed = AsyncMock(return_value=Result.ok(fake_exec))
 
         with (
-            patch("ouroboros.mcp.tools.definitions.ClaudeAgentAdapter"),
-            patch("ouroboros.mcp.tools.definitions.EventStore") as mock_es_cls,
+            patch("ouroboros.mcp.tools.handlers.execution.ClaudeAgentAdapter"),
+            patch("ouroboros.mcp.tools.handlers.execution.EventStore") as mock_es_cls,
             patch(
-                "ouroboros.mcp.tools.definitions.OrchestratorRunner",
+                "ouroboros.mcp.tools.handlers.execution.OrchestratorRunner",
                 return_value=mock_runner,
             ),
             patch(
@@ -194,10 +194,10 @@ class TestExecuteSeedHandlerQA:
         mock_runner.execute_seed = AsyncMock(return_value=Result.ok(fake_exec))
 
         with (
-            patch("ouroboros.mcp.tools.definitions.ClaudeAgentAdapter"),
-            patch("ouroboros.mcp.tools.definitions.EventStore") as mock_es_cls,
+            patch("ouroboros.mcp.tools.handlers.execution.ClaudeAgentAdapter"),
+            patch("ouroboros.mcp.tools.handlers.execution.EventStore") as mock_es_cls,
             patch(
-                "ouroboros.mcp.tools.definitions.OrchestratorRunner",
+                "ouroboros.mcp.tools.handlers.execution.OrchestratorRunner",
                 return_value=mock_runner,
             ),
             patch(
@@ -225,10 +225,10 @@ class TestExecuteSeedHandlerQA:
         qa_error = Result.err(MCPToolError("LLM failed", tool_name="ouroboros_qa"))
 
         with (
-            patch("ouroboros.mcp.tools.definitions.ClaudeAgentAdapter"),
-            patch("ouroboros.mcp.tools.definitions.EventStore") as mock_es_cls,
+            patch("ouroboros.mcp.tools.handlers.execution.ClaudeAgentAdapter"),
+            patch("ouroboros.mcp.tools.handlers.execution.EventStore") as mock_es_cls,
             patch(
-                "ouroboros.mcp.tools.definitions.OrchestratorRunner",
+                "ouroboros.mcp.tools.handlers.execution.OrchestratorRunner",
                 return_value=mock_runner,
             ),
             patch(
