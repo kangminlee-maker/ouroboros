@@ -67,6 +67,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -79,6 +82,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -91,6 +97,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         # Should not converge via oscillation (may not converge at all)
@@ -104,6 +113,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         # With 2 gens, oscillation requires >= 3, so it won't trigger oscillation
         signal = criteria.evaluate(lineage)
@@ -118,6 +130,9 @@ class TestOscillationDetection:
             min_generations=2,
             max_generations=30,
             enable_oscillation_detection=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         # Should not converge via oscillation
@@ -131,6 +146,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -143,6 +161,9 @@ class TestOscillationDetection:
             convergence_threshold=0.95,
             min_generations=2,
             max_generations=30,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         # Should not raise
         signal = criteria.evaluate(lineage)
@@ -274,6 +295,9 @@ class TestConvergenceGating:
             convergence_threshold=0.95,
             min_generations=2,
             eval_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -292,6 +316,9 @@ class TestConvergenceGating:
             min_generations=2,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -310,6 +337,9 @@ class TestConvergenceGating:
             min_generations=2,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -328,6 +358,9 @@ class TestConvergenceGating:
             min_generations=2,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -344,6 +377,9 @@ class TestConvergenceGating:
             convergence_threshold=0.95,
             min_generations=2,
             eval_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_evaluation=None)
         assert signal.converged
@@ -358,6 +394,9 @@ class TestConvergenceGating:
             max_generations=3,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -376,6 +415,9 @@ class TestConvergenceGating:
             min_generations=2,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -393,6 +435,9 @@ class TestConvergenceGating:
             min_generations=2,
             eval_gate_enabled=True,
             eval_min_score=0.7,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -422,6 +467,9 @@ class TestEvolutionGateDetection:
             min_generations=2,
             stagnation_window=4,
             eval_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert not signal.converged
@@ -434,6 +482,9 @@ class TestEvolutionGateDetection:
             convergence_threshold=0.95,
             min_generations=2,
             eval_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -446,6 +497,9 @@ class TestEvolutionGateDetection:
             convergence_threshold=0.95,
             min_generations=2,
             eval_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert not signal.converged
@@ -459,6 +513,9 @@ class TestEvolutionGateDetection:
             min_generations=2,
             max_generations=3,
             eval_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -479,6 +536,9 @@ class TestValidationGate:
             convergence_threshold=0.95,
             min_generations=2,
             validation_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -494,6 +554,9 @@ class TestValidationGate:
             convergence_threshold=0.95,
             min_generations=2,
             validation_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -509,6 +572,9 @@ class TestValidationGate:
             convergence_threshold=0.95,
             min_generations=2,
             validation_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -523,6 +589,9 @@ class TestValidationGate:
             convergence_threshold=0.95,
             min_generations=2,
             validation_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, validation_output=None)
         assert signal.converged
@@ -534,6 +603,9 @@ class TestValidationGate:
             convergence_threshold=0.95,
             min_generations=2,
             validation_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(
             lineage,
@@ -600,7 +672,13 @@ class TestTerminationReasonEnum:
                 GenerationRecord(generation_number=3, seed_id="s3", ontology_snapshot=schema_b),
             ),
         )
-        criteria = ConvergenceCriteria(convergence_threshold=0.95, min_generations=2)
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
+        )
         signal = criteria.evaluate(lineage)
         assert signal.converged
         assert signal.termination_reason == TerminationReason.CONVERGED
@@ -628,6 +706,9 @@ class TestTerminationReasonEnum:
             convergence_threshold=0.95,
             stagnation_window=3,
             min_generations=2,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -653,6 +734,9 @@ class TestTerminationReasonEnum:
             convergence_threshold=0.95,
             min_generations=2,
             enable_oscillation_detection=True,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -701,6 +785,8 @@ class TestOntologyCompletenessGate:
             min_generations=2,
             ontology_completeness_gate_enabled=True,
             ontology_min_fields=3,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert not signal.converged
@@ -718,6 +804,8 @@ class TestOntologyCompletenessGate:
             min_generations=2,
             ontology_completeness_gate_enabled=True,
             ontology_min_fields=3,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert not signal.converged
@@ -738,6 +826,8 @@ class TestOntologyCompletenessGate:
             min_generations=2,
             ontology_completeness_gate_enabled=True,
             ontology_min_fields=3,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -750,6 +840,8 @@ class TestOntologyCompletenessGate:
             convergence_threshold=0.95,
             min_generations=2,
             ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -778,7 +870,9 @@ class TestOntologyCompletenessGate:
             min_generations=2,
             stagnation_window=3,
             ontology_completeness_gate_enabled=True,
-            ontology_min_fields=5,  # would block: only 1 field
+            ontology_min_fields=5,  # would block: only 1 field,
+            wonder_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         # Stagnation safety should override the completeness gate
@@ -830,6 +924,8 @@ class TestWonderGate:
             min_generations=2,
             wonder_gate_enabled=True,
             wonder_novelty_threshold=0.5,
+            ontology_completeness_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_wonder=wonder)
         assert not signal.converged
@@ -849,6 +945,8 @@ class TestWonderGate:
             min_generations=2,
             wonder_gate_enabled=True,
             wonder_novelty_threshold=0.5,
+            ontology_completeness_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_wonder=wonder)
         assert signal.converged
@@ -860,6 +958,8 @@ class TestWonderGate:
             convergence_threshold=0.95,
             min_generations=2,
             wonder_gate_enabled=True,
+            ontology_completeness_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_wonder=None)
         assert signal.converged
@@ -875,6 +975,8 @@ class TestWonderGate:
             convergence_threshold=0.95,
             min_generations=2,
             wonder_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_wonder=wonder)
         assert signal.converged
@@ -926,6 +1028,8 @@ class TestDriftTrendGate:
             stagnation_window=5,  # avoid stagnation safety firing first
             drift_trend_gate_enabled=True,
             drift_trend_window=3,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert not signal.converged
@@ -939,6 +1043,8 @@ class TestDriftTrendGate:
             min_generations=2,
             drift_trend_gate_enabled=True,
             drift_trend_window=3,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -951,6 +1057,8 @@ class TestDriftTrendGate:
             min_generations=2,
             drift_trend_gate_enabled=True,
             drift_trend_window=3,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -963,6 +1071,8 @@ class TestDriftTrendGate:
             min_generations=2,
             drift_trend_gate_enabled=True,
             drift_trend_window=3,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged
@@ -974,6 +1084,8 @@ class TestDriftTrendGate:
             convergence_threshold=0.95,
             min_generations=2,
             drift_trend_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+            wonder_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
         assert signal.converged

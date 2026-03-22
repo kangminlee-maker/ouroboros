@@ -70,11 +70,11 @@ class ConvergenceCriteria:
     ac_min_pass_ratio: float = 1.0  # for "ratio" mode
     regression_gate_enabled: bool = True
     validation_gate_enabled: bool = True
-    ontology_completeness_gate_enabled: bool = False
+    ontology_completeness_gate_enabled: bool = True
     ontology_min_fields: int = 3
-    wonder_gate_enabled: bool = False
+    wonder_gate_enabled: bool = True
     wonder_novelty_threshold: float = 0.5
-    drift_trend_gate_enabled: bool = False
+    drift_trend_gate_enabled: bool = True
     drift_trend_window: int = 3
 
     def evaluate(
