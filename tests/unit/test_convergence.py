@@ -511,11 +511,15 @@ class TestEvolutionGateDetection:
     """
 
     def test_blocks_when_ontology_never_evolved(self) -> None:
-        """Identical ontology across all generations -> convergence withheld."""
+        """Identical ontology across 2 generations -> convergence withheld.
+
+        Uses stagnation_window=4 to avoid stagnation safety firing first.
+        """
         lineage = _lineage_with_schemas(SCHEMA_A, SCHEMA_A, SCHEMA_A)
         criteria = ConvergenceCriteria(
             convergence_threshold=0.95,
             min_generations=2,
+            stagnation_window=4,
             eval_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage)
@@ -753,3 +757,129 @@ class TestTerminationReasonEnum:
         assert signal.converged
         assert signal.termination_reason == TerminationReason.OSCILLATED
         assert "Oscillation" in signal.reason
+
+
+# --- Ontology Completeness Gate ---
+
+
+class TestOntologyCompletenessGate:
+    """Tests for ontology_completeness_gate in convergence criteria."""
+
+    @staticmethod
+    def _stable_lineage(
+        fields: tuple[str, ...],
+        descriptions: tuple[str, ...] | None = None,
+    ) -> OntologyLineage:
+        """Create a lineage where the last 2 gens have identical ontology."""
+        if descriptions is None:
+            descriptions = tuple(f"Description of {f}" for f in fields)
+        schema_init = _schema(("initial_different_field",))
+        schema = OntologySchema(
+            name="Test",
+            description="Test schema",
+            fields=tuple(
+                OntologyField(name=n, field_type="string", description=d, required=True)
+                for n, d in zip(fields, descriptions)
+            ),
+        )
+        return OntologyLineage(
+            lineage_id="test",
+            goal="test",
+            generations=(
+                GenerationRecord(generation_number=1, seed_id="s1", ontology_snapshot=schema_init),
+                GenerationRecord(generation_number=2, seed_id="s2", ontology_snapshot=schema),
+                GenerationRecord(generation_number=3, seed_id="s3", ontology_snapshot=schema),
+            ),
+        )
+
+    def test_blocks_when_too_few_fields(self) -> None:
+        """Completeness gate blocks when field count < min_fields."""
+        lineage = self._stable_lineage(("name", "age"))
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            ontology_completeness_gate_enabled=True,
+            ontology_min_fields=3,
+        )
+        signal = criteria.evaluate(lineage)
+        assert not signal.converged
+        assert "completeness gate" in signal.reason.lower()
+        assert "2 fields" in signal.reason
+
+    def test_blocks_when_trivial_descriptions(self) -> None:
+        """Completeness gate blocks when majority of descriptions are trivial."""
+        lineage = self._stable_lineage(
+            ("name", "age", "email"),
+            descriptions=("name", "age", "Detailed email address for contact"),
+        )
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            ontology_completeness_gate_enabled=True,
+            ontology_min_fields=3,
+        )
+        signal = criteria.evaluate(lineage)
+        assert not signal.converged
+        assert "trivial descriptions" in signal.reason.lower()
+
+    def test_passes_when_sufficient_fields_and_descriptions(self) -> None:
+        """Completeness gate passes with enough fields and good descriptions."""
+        lineage = self._stable_lineage(
+            ("name", "age", "email"),
+            descriptions=(
+                "Full legal name of the person",
+                "Age in years since birth",
+                "Primary email address for contact",
+            ),
+        )
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            ontology_completeness_gate_enabled=True,
+            ontology_min_fields=3,
+        )
+        signal = criteria.evaluate(lineage)
+        assert signal.converged
+        assert signal.termination_reason == TerminationReason.CONVERGED
+
+    def test_disabled_allows_convergence(self) -> None:
+        """Disabled completeness gate allows convergence regardless."""
+        lineage = self._stable_lineage(("x",))
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            ontology_completeness_gate_enabled=False,
+        )
+        signal = criteria.evaluate(lineage)
+        assert signal.converged
+
+    def test_stagnation_safety_overrides_gate_blocking(self) -> None:
+        """When stagnation_window is reached, stagnation terminates even if gate blocks."""
+        schema_init = _schema(("different",))
+        schema = OntologySchema(
+            name="T",
+            description="T",
+            fields=(OntologyField(name="x", field_type="string", description="x", required=True),),
+        )
+        # 4 gens: gen1 different, gen2-4 identical → stagnation_window=3 reached
+        lineage = OntologyLineage(
+            lineage_id="test",
+            goal="test",
+            generations=(
+                GenerationRecord(generation_number=1, seed_id="s1", ontology_snapshot=schema_init),
+                GenerationRecord(generation_number=2, seed_id="s2", ontology_snapshot=schema),
+                GenerationRecord(generation_number=3, seed_id="s3", ontology_snapshot=schema),
+                GenerationRecord(generation_number=4, seed_id="s4", ontology_snapshot=schema),
+            ),
+        )
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            stagnation_window=3,
+            ontology_completeness_gate_enabled=True,
+            ontology_min_fields=5,  # would block: only 1 field
+        )
+        signal = criteria.evaluate(lineage)
+        # Stagnation safety should override the completeness gate
+        assert signal.converged
+        assert signal.termination_reason == TerminationReason.STAGNATED

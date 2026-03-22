@@ -71,6 +71,12 @@ class EvolutionaryLoopConfig:
     enable_oscillation_detection: bool = True
     eval_gate_enabled: bool = True
     eval_min_score: float = 0.7
+    ac_gate_mode: str = "all"
+    ac_min_pass_ratio: float = 1.0
+    regression_gate_enabled: bool = True
+    validation_gate_enabled: bool = True
+    ontology_completeness_gate_enabled: bool = False
+    ontology_min_fields: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +178,12 @@ class EvolutionaryLoop:
             enable_oscillation_detection=self.config.enable_oscillation_detection,
             eval_gate_enabled=self.config.eval_gate_enabled,
             eval_min_score=self.config.eval_min_score,
+            ac_gate_mode=self.config.ac_gate_mode,
+            ac_min_pass_ratio=self.config.ac_min_pass_ratio,
+            regression_gate_enabled=self.config.regression_gate_enabled,
+            validation_gate_enabled=self.config.validation_gate_enabled,
+            ontology_completeness_gate_enabled=self.config.ontology_completeness_gate_enabled,
+            ontology_min_fields=self.config.ontology_min_fields,
         )
 
     def set_project_dir(self, project_dir: str | None) -> Token[str | None]:
