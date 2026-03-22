@@ -14,6 +14,8 @@ from dataclasses import dataclass
 
 from ouroboros.core.lineage import (
     EvaluationSummary,
+    GenerationPhase,
+    GenerationRecord,
     OntologyDelta,
     OntologyLineage,
     TerminationReason,
@@ -92,11 +94,12 @@ class ConvergenceCriteria:
         Returns:
             ConvergenceSignal with convergence status and reason.
         """
-        num_gens = len(lineage.generations)
+        completed = self._completed_generations(lineage)
+        num_completed = len(completed)
         current_gen = lineage.current_generation
 
-        # Signal 4: Hard cap
-        if num_gens >= self.max_generations:
+        # Signal 4: Hard cap (only count completed generations)
+        if num_completed >= self.max_generations:
             return ConvergenceSignal(
                 converged=True,
                 reason=f"Max generations reached ({self.max_generations})",
@@ -105,11 +108,11 @@ class ConvergenceCriteria:
                 termination_reason=TerminationReason.EXHAUSTED,
             )
 
-        # Need at least min_generations before checking other signals
-        if num_gens < self.min_generations:
+        # Need at least min_generations completed before checking other signals
+        if num_completed < self.min_generations:
             return ConvergenceSignal(
                 converged=False,
-                reason=f"Below minimum generations ({num_gens}/{self.min_generations})",
+                reason=f"Below minimum generations ({num_completed}/{self.min_generations})",
                 ontology_similarity=0.0,
                 generation=current_gen,
             )
@@ -171,7 +174,8 @@ class ConvergenceCriteria:
 
             # Signal 5: Regression gate — block convergence if ACs regressed
             if self.regression_gate_enabled:
-                regression_report = RegressionDetector().detect(lineage)
+                completed_lineage = lineage.model_copy(update={"generations": completed})
+                regression_report = RegressionDetector().detect(completed_lineage)
                 if regression_report.has_regressions:
                     regressed = regression_report.regressed_ac_indices
                     display = ", ".join(str(i + 1) for i in regressed)
@@ -195,7 +199,7 @@ class ConvergenceCriteria:
                     converged=False,
                     reason=(
                         f"Convergence withheld: similarity {latest_sim:.3f} "
-                        f"but ontology unchanged across {num_gens} generations "
+                        f"but ontology unchanged across {num_completed} generations "
                         f"(evolution required before convergence is accepted)"
                     ),
                     ontology_similarity=latest_sim,
@@ -265,7 +269,7 @@ class ConvergenceCriteria:
             )
 
         # Signal 2: Stagnation (unchanged for N consecutive gens)
-        if num_gens >= self.stagnation_window:
+        if num_completed >= self.stagnation_window:
             stagnant = self._check_stagnation(lineage)
             if stagnant:
                 return ConvergenceSignal(
@@ -280,7 +284,7 @@ class ConvergenceCriteria:
                 )
 
         # Signal 2.5: Oscillation detection (A→B→A→B cycling)
-        if self.enable_oscillation_detection and num_gens >= 3:
+        if self.enable_oscillation_detection and num_completed >= 3:
             oscillating = self._check_oscillation(lineage)
             if oscillating:
                 return ConvergenceSignal(
@@ -292,7 +296,7 @@ class ConvergenceCriteria:
                 )
 
         # Signal 3: Repetitive wonder questions
-        if latest_wonder and num_gens >= 3:
+        if latest_wonder and num_completed >= 3:
             repetitive = self._check_repetitive_feedback(lineage, latest_wonder)
             if repetitive:
                 return ConvergenceSignal(
@@ -312,12 +316,13 @@ class ConvergenceCriteria:
         )
 
     def _latest_similarity(self, lineage: OntologyLineage) -> float:
-        """Compute similarity between the last two generations."""
-        if len(lineage.generations) < 2:
+        """Compute similarity between the last two completed generations."""
+        gens = self._completed_generations(lineage)
+        if len(gens) < 2:
             return 0.0
 
-        prev = lineage.generations[-2].ontology_snapshot
-        curr = lineage.generations[-1].ontology_snapshot
+        prev = gens[-2].ontology_snapshot
+        curr = gens[-1].ontology_snapshot
         delta = OntologyDelta.compute(prev, curr)
         return delta.similarity
 
@@ -330,7 +335,7 @@ class ConvergenceCriteria:
         conservatively preserved a well-performing ontology, or because
         Wonder/Reflect encountered errors preventing mutation.
         """
-        gens = lineage.generations
+        gens = self._completed_generations(lineage)
         if len(gens) < 2:
             return 0
 
@@ -374,6 +379,18 @@ class ConvergenceCriteria:
                 )
 
         return None
+
+    def _completed_generations(
+        self, lineage: OntologyLineage
+    ) -> tuple[GenerationRecord, ...]:
+        """Return only completed generations for convergence calculations.
+
+        Pending/failed generations are excluded because their ontology
+        snapshots are placeholders, not real evaluation results.
+        """
+        return tuple(
+            g for g in lineage.generations if g.phase == GenerationPhase.COMPLETED
+        )
 
     def _check_drift_trend_gate(self, lineage: OntologyLineage) -> str | None:
         """Block convergence if drift_score shows monotonic increase.
@@ -475,7 +492,7 @@ class ConvergenceCriteria:
 
     def _check_stagnation(self, lineage: OntologyLineage) -> bool:
         """Check if ontology has been unchanged for stagnation_window gens."""
-        gens = lineage.generations
+        gens = self._completed_generations(lineage)
         if len(gens) < self.stagnation_window:
             return False
 
@@ -492,7 +509,7 @@ class ConvergenceCriteria:
 
     def _check_oscillation(self, lineage: OntologyLineage) -> bool:
         """Detect oscillation: N~N-2 AND N-1~N-3 (full period-2 verification)."""
-        gens = lineage.generations
+        gens = self._completed_generations(lineage)
 
         # Period-2 full check: A→B→A→B — verify BOTH half-periods
         if len(gens) >= 4:
@@ -526,9 +543,10 @@ class ConvergenceCriteria:
 
         latest_set = set(latest_wonder.questions)
 
-        # Check against last 2 generations' wonder questions
+        # Check against last 2 completed generations' wonder questions
         repeat_count = 0
-        for gen in lineage.generations[-3:]:
+        completed = self._completed_generations(lineage)
+        for gen in completed[-3:]:
             if gen.wonder_questions:
                 prev_set = set(gen.wonder_questions)
                 overlap = len(latest_set & prev_set)
