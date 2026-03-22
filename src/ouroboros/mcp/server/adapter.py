@@ -35,6 +35,21 @@ from ouroboros.mcp.types import (
 
 log = structlog.get_logger(__name__)
 
+VALID_TRANSPORTS: frozenset[str] = frozenset({"stdio", "sse"})
+
+
+def validate_transport(transport: str) -> str:
+    """Normalize and validate a transport string.
+
+    Returns the lowercased transport if valid, raises ValueError otherwise.
+    """
+    transport = transport.lower()
+    if transport not in VALID_TRANSPORTS:
+        msg = f"Invalid transport {transport!r}. Must be one of: {', '.join(sorted(VALID_TRANSPORTS))}"
+        raise ValueError(msg)
+    return transport
+
+
 # Map MCPToolParameter types to Python annotations for FastMCP schema inference.
 _TOOL_TYPE_MAP: dict[ToolInputType, type] = {
     ToolInputType.STRING: str,
@@ -415,18 +430,28 @@ class MCPServerAdapter:
         Uses the MCP SDK's FastMCP server implementation.
 
         Args:
-            transport: Transport type - "stdio" or "sse".
-            host: Host to bind to (SSE only).
-            port: Port to bind to (SSE only).
+            transport: Transport type - "stdio" or "sse" (case-insensitive).
+            host: Host to bind to (SSE only). Defaults to "localhost".
+            port: Port to bind to (SSE only). Defaults to 8080.
         """
+        transport = validate_transport(transport)
+
         try:
             from mcp.server.fastmcp import FastMCP
         except ImportError as e:
             msg = "mcp package not installed. Install with: pip install mcp"
             raise ImportError(msg) from e
 
-        # Create FastMCP server
-        self._mcp_server = FastMCP(self._name)
+        # Pass host/port at construction time — FastMCP reads these from
+        # its internal settings, so run_sse_async() alone won't pick them up.
+        if transport == "sse":
+            self._mcp_server = FastMCP(
+                self._name,
+                host=host,
+                port=port,
+            )
+        else:
+            self._mcp_server = FastMCP(self._name)
 
         # Register tools with FastMCP
         for _name, handler in self._tool_handlers.items():
@@ -489,7 +514,7 @@ class MCPServerAdapter:
 
         # Run the server with the appropriate transport
         if transport == "sse":
-            await self._mcp_server.run_sse_async(host=host, port=port)
+            await self._mcp_server.run_sse_async()
         else:
             await self._mcp_server.run_stdio_async()
 

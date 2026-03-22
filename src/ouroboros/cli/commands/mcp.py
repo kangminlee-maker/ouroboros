@@ -101,9 +101,16 @@ async def _run_mcp_server(
         transport: Transport type (stdio or sse).
         db_path: Optional path to EventStore database.
     """
-    from ouroboros.mcp.server.adapter import create_ouroboros_server
+    from ouroboros.mcp.server.adapter import create_ouroboros_server, validate_transport
     from ouroboros.orchestrator.session import SessionRepository
     from ouroboros.persistence.event_store import EventStore
+
+    # Validate transport early, before any expensive startup work
+    try:
+        transport = validate_transport(transport)
+    except ValueError:
+        print_error(f"Invalid transport {transport!r}. Must be 'stdio' or 'sse'.")
+        raise typer.Exit(code=1)
 
     # Create EventStore with custom path if provided
     if db_path:
