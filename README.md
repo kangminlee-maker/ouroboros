@@ -1,3 +1,11 @@
+> **ouroboros-sentinel** — A hardened fork of [Ouroboros](https://github.com/Q00/ouroboros) with convergence verification gates.
+>
+> Prevents false convergence by adding 6 validation layers: transition matrix guard, termination reason typing, ontology completeness gate, wonder novelty gate, drift trend gate, and StrEnum exhaustiveness safety tests. All gates are opt-in (disabled by default) — zero impact on existing behavior.
+>
+> Upstream: [Q00/ouroboros](https://github.com/Q00/ouroboros) | 2,722 tests passing
+
+---
+
 <p align="right">
   <strong>English</strong> | <a href="./README.ko.md">한국어</a>
 </p>
