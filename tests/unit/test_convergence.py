@@ -54,6 +54,27 @@ def _lineage_with_schemas(*schemas: OntologySchema) -> OntologyLineage:
     )
 
 
+def _generation(
+    number: int,
+    schema: OntologySchema,
+    phase: GenerationPhase = GenerationPhase.COMPLETED,
+) -> GenerationRecord:
+    return GenerationRecord(
+        generation_number=number,
+        seed_id=f"seed_{number}",
+        ontology_snapshot=schema,
+        phase=phase,
+    )
+
+
+def _lineage_with_generations(*generations: GenerationRecord) -> OntologyLineage:
+    return OntologyLineage(
+        lineage_id="test_lin",
+        goal="test goal",
+        generations=tuple(generations),
+    )
+
+
 # -- Feature 1: Oscillation Detection --
 
 
@@ -271,6 +292,84 @@ class TestOscillationLoopRouting:
         result = await loop.evolve_step("lin_osc")
         assert result.is_ok
         assert result.value.action == StepAction.STAGNATED
+
+
+class TestCompletedGenerationFiltering:
+    """Regression guards for interrupted generations with pending ontologies."""
+
+    def test_latest_similarity_ignores_pending_tail(self) -> None:
+        lineage = _lineage_with_generations(
+            _generation(1, SCHEMA_B),
+            _generation(2, SCHEMA_A),
+            _generation(3, SCHEMA_C, phase=GenerationPhase.WONDERING),
+        )
+        criteria = ConvergenceCriteria(convergence_threshold=0.95, min_generations=2)
+
+        assert criteria._latest_similarity(lineage) == pytest.approx(0.0)
+
+    def test_stagnation_ignores_pending_tail(self) -> None:
+        lineage = _lineage_with_generations(
+            _generation(1, SCHEMA_A),
+            _generation(2, SCHEMA_A),
+            _generation(3, SCHEMA_B, phase=GenerationPhase.WONDERING),
+        )
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            stagnation_window=2,
+        )
+
+        assert criteria._check_stagnation(lineage) is True
+
+    def test_oscillation_ignores_pending_tail(self) -> None:
+        lineage = _lineage_with_generations(
+            _generation(1, SCHEMA_A),
+            _generation(2, SCHEMA_B),
+            _generation(3, SCHEMA_A),
+            _generation(4, SCHEMA_C, phase=GenerationPhase.WONDERING),
+        )
+        criteria = ConvergenceCriteria(convergence_threshold=0.95, min_generations=2)
+
+        assert criteria._check_oscillation(lineage) is True
+
+    def test_evolution_count_ignores_pending_tail(self) -> None:
+        lineage = _lineage_with_generations(
+            _generation(1, SCHEMA_A),
+            _generation(2, SCHEMA_B),
+            _generation(3, SCHEMA_C, phase=GenerationPhase.WONDERING),
+        )
+        criteria = ConvergenceCriteria(convergence_threshold=0.95, min_generations=2)
+
+        assert criteria._count_evolved_generations(lineage) == 1
+
+    def test_evaluate_max_generations_ignores_pending(self) -> None:
+        """max_generations should only count completed generations."""
+        # 29 completed + 1 pending = 30 total, but only 29 completed
+        completed_gens = [_generation(i, SCHEMA_A) for i in range(1, 30)]
+        pending = _generation(30, SCHEMA_B, phase=GenerationPhase.WONDERING)
+        lineage = _lineage_with_generations(*completed_gens, pending)
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            max_generations=30,
+        )
+        signal = criteria.evaluate(lineage, None)
+        # Should NOT hit max_generations because only 29 are completed
+        assert "Max generations" not in signal.reason
+
+    def test_evaluate_min_generations_ignores_pending(self) -> None:
+        """min_generations guard should only count completed generations."""
+        lineage = _lineage_with_generations(
+            _generation(1, SCHEMA_A),
+            _generation(2, SCHEMA_B, phase=GenerationPhase.WONDERING),
+        )
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+        )
+        signal = criteria.evaluate(lineage, None)
+        assert "Below minimum" in signal.reason
+        assert "1/2" in signal.reason  # Only 1 completed out of 2 required
 
 
 # -- Feature 2: Convergence Gating via Evaluation --

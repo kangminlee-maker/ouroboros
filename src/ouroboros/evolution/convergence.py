@@ -174,6 +174,7 @@ class ConvergenceCriteria:
 
             # Signal 5: Regression gate — block convergence if ACs regressed
             if self.regression_gate_enabled:
+                # Pass only completed generations to regression detector
                 completed_lineage = lineage.model_copy(update={"generations": completed})
                 regression_report = RegressionDetector().detect(completed_lineage)
                 if regression_report.has_regressions:
@@ -314,6 +315,10 @@ class ConvergenceCriteria:
             ontology_similarity=latest_sim,
             generation=current_gen,
         )
+
+    def _completed_generations(self, lineage: OntologyLineage) -> tuple[GenerationRecord, ...]:
+        """Return only completed generations for convergence calculations."""
+        return tuple(g for g in lineage.generations if g.phase == GenerationPhase.COMPLETED)
 
     def _latest_similarity(self, lineage: OntologyLineage) -> float:
         """Compute similarity between the last two completed generations."""

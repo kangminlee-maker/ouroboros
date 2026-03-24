@@ -37,6 +37,33 @@
 
 ---
 
+> **보안 공지 (2026-03-24): LiteLLM PyPI 공급망 공격**
+>
+> LiteLLM 1.82.7 / 1.82.8 버전에 악성 `.pth` 파일이 포함되어 배포되었습니다. 이 파일은 `import` 없이도 **Python 시작 시 자동 실행**되며, 환경변수, API 키, SSH 키, 클라우드 크레덴셜을 외부 서버로 전송합니다.
+>
+> **영향 범위:** 2026년 3월 23일 이후에 아래 중 하나라도 해당되면 감염 가능성이 있습니다:
+> - Ouroboros를 신규 설치 (`pip install ouroboros-ai`, `uv tool install ouroboros-ai`)
+> - 기존 설치를 업그레이드 (`pip install --upgrade ouroboros-ai`)
+>
+> 두 경우 모두 `litellm>=1.80.0` 의존성이 악성 버전 1.82.7/1.82.8로 resolve됩니다. 그 이전에 설치하고 재설치/업그레이드하지 않았다면 안전합니다.
+>
+> **Ouroboros는 litellm 의존성을 완전 제거했습니다** (v0.25.2 stable / v0.26.0b7 beta). 단, **Ouroboros를 업데이트하면 의존성 목록에서 litellm이 빠질 뿐, 이미 설치된 litellm 패키지와 악성 `.pth` 파일은 그대로 남아있습니다.** 수동 정리가 필요합니다:
+>
+> ```bash
+> # 1. 악성 파일 찾기 — 결과가 나오면 즉시 삭제
+> find / -name "litellm_init.pth" 2>/dev/null
+>
+> # 2. 패키지 매니저 캐시 정리
+> uv cache clean litellm    # uv 사용자
+> pip cache purge            # pip 사용자
+>
+> # 3. 노출 기간 동안 시스템에 있던 모든 크레덴셜 로테이션
+> ```
+>
+> 참고: [LiteLLM #24512](https://github.com/BerriAI/litellm/issues/24512) · [Ouroboros #195](https://github.com/Q00/ouroboros/issues/195) · [분석 보고서](https://futuresearch.ai/blog/litellm-pypi-supply-chain-attack/)
+
+---
+
 > *AI는 무엇이든 만들 수 있다. 어려운 건 무엇을 만들어야 하는지 아는 것이다.*
 
 Ouroboros는 **명세 우선 AI 개발 시스템**입니다. 이 시스템은 소크라테스식 질문법과 온톨로지 분석을 적용하여, 단 한 줄의 코드도 작성하기 전에 사용자의 숨겨진 가정을 드러냅니다.
