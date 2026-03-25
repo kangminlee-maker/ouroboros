@@ -779,7 +779,7 @@ class TestOntologyCompletenessGate:
             description="Test schema",
             fields=tuple(
                 OntologyField(name=n, field_type="string", description=d, required=True)
-                for n, d in zip(fields, descriptions)
+                for n, d in zip(fields, descriptions, strict=True)
             ),
         )
         return OntologyLineage(
