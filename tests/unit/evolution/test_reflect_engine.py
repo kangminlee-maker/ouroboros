@@ -5,7 +5,6 @@ Tests JSON parsing, mutation extraction, and fallback behavior without LLM calls
 
 from __future__ import annotations
 
-
 from ouroboros.core.lineage import MutationAction
 from ouroboros.core.seed import OntologyField, OntologySchema, Seed, SeedMetadata
 from ouroboros.evolution.reflect import ReflectEngine

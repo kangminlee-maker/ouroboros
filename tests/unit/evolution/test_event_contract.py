@@ -8,10 +8,8 @@ drops when new lineage events are added without updating the projector.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
-
-import pytest
+import re
 
 # --- Paths ---
 _SRC = Path(__file__).resolve().parents[3] / "src" / "ouroboros"

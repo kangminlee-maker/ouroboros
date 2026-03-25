@@ -5,7 +5,6 @@ Tests the JSON parsing logic and degraded mode heuristics without LLM calls.
 
 from __future__ import annotations
 
-
 from ouroboros.core.lineage import EvaluationSummary
 from ouroboros.core.seed import OntologyField, OntologySchema
 from ouroboros.evolution.wonder import WonderEngine
