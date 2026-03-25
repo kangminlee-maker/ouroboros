@@ -51,7 +51,7 @@ class SeedGenerator:
     structured, immutable Seed specifications.
 
     Example:
-        generator = SeedGenerator(llm_adapter=LiteLLMAdapter())
+        generator = SeedGenerator(llm_adapter=AnthropicAdapter())
 
         # Generate seed from interview
         result = await generator.generate(

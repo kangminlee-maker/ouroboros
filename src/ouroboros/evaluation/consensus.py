@@ -41,11 +41,6 @@ from ouroboros.events.evaluation import (
     create_stage3_started_event,
 )
 from ouroboros.providers.base import CompletionConfig, LLMAdapter, Message, MessageRole
-
-try:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
-except ImportError:
-    LiteLLMAdapter = None  # type: ignore[assignment,misc]
 from ouroboros.strategies.devil_advocate import ConsensusContext, DevilAdvocateStrategy
 
 # Default models for consensus voting (Frontier tier)
@@ -652,7 +647,7 @@ class DeliberativeConsensus:
 
     def __init__(
         self,
-        llm_adapter: LiteLLMAdapter,
+        llm_adapter: LLMAdapter,
         config: DeliberativeConfig | None = None,
         devil_strategy: DevilAdvocateStrategy | None = None,
     ) -> None:
@@ -977,7 +972,7 @@ async def run_consensus_evaluation(
 
 async def run_deliberative_evaluation(
     context: EvaluationContext,
-    llm_adapter: LiteLLMAdapter,
+    llm_adapter: LLMAdapter,
     trigger_reason: str = "manual",
     config: DeliberativeConfig | None = None,
     devil_strategy: DevilAdvocateStrategy | None = None,

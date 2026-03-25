@@ -47,7 +47,7 @@ from ouroboros.events.decomposition import (
 from ouroboros.observability.logging import get_logger
 
 if TYPE_CHECKING:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
+    from ouroboros.providers.base import LLMAdapter
 
 log = get_logger(__name__)
 
@@ -289,7 +289,7 @@ async def decompose_ac(
     ac_id: str,
     execution_id: str,
     depth: int,
-    llm_adapter: LiteLLMAdapter,
+    llm_adapter: LLMAdapter,
     discover_insights: str = "",
     *,
     model: str = "claude-opus-4-6",

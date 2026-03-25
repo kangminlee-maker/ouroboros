@@ -1,7 +1,7 @@
 """Init command for starting interactive interview.
 
 This command initiates the Big Bang phase interview process.
-Supports both LiteLLM (external API) and Claude Code (Max Plan) modes.
+Supports both Anthropic API (external API) and Claude Code (Max Plan) modes.
 """
 
 import asyncio
@@ -27,12 +27,8 @@ from ouroboros.bigbang.seed_generator import SeedGenerator
 from ouroboros.cli.formatters import console
 from ouroboros.cli.formatters.panels import print_error, print_info, print_success, print_warning
 from ouroboros.observability import LoggingConfig, configure_logging
+from ouroboros.providers.anthropic_adapter import AnthropicAdapter
 from ouroboros.providers.base import LLMAdapter
-
-try:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
-except ImportError:
-    LiteLLMAdapter = None  # type: ignore[assignment,misc]
 
 
 class SeedGenerationResult(Enum):
@@ -161,7 +157,7 @@ def _get_adapter(
             )
         return ClaudeCodeAdapter()
     else:
-        return LiteLLMAdapter()
+        return AnthropicAdapter()
 
 
 async def _run_interview_loop(
@@ -553,7 +549,7 @@ def start(
     if orchestrator:
         print_info("Using Claude Code (Max Plan) - no API key required")
     else:
-        print_info("Using LiteLLM - API key required")
+        print_info("Using Anthropic API - API key required")
 
     # Run interview
     try:
@@ -581,7 +577,7 @@ def list_interviews(
     ] = None,
 ) -> None:
     """List all interview sessions."""
-    llm_adapter = LiteLLMAdapter()
+    llm_adapter = AnthropicAdapter()
     engine = InterviewEngine(
         llm_adapter=llm_adapter,
         state_dir=state_dir or Path.home() / ".ouroboros" / "data",

@@ -135,6 +135,8 @@ def make_loop(
             convergence_threshold=0.95,
             stagnation_window=3,
             min_generations=2,
+            wonder_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
         ),
     )
 

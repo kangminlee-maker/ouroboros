@@ -64,7 +64,7 @@ _RETRYABLE_ERROR_PATTERNS = (
 class ClaudeCodeAdapter:
     """LLM adapter using Claude Agent SDK (Claude Code Max Plan).
 
-    This adapter provides the same interface as LiteLLMAdapter but uses
+    This adapter provides the same interface as AnthropicAdapter but uses
     the Claude Agent SDK under the hood. This allows users to leverage
     their Claude Code Max Plan subscription without needing separate API keys.
 

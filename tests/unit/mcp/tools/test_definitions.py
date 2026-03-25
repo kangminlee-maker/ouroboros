@@ -749,7 +749,7 @@ class TestInterviewHandlerCwd:
         mock_engine.save_state = AsyncMock(return_value=MagicMock(is_ok=True, is_err=False))
 
         with patch(
-            "ouroboros.mcp.tools.handlers.interview.InterviewEngine",
+            "ouroboros.mcp.tools.definitions.InterviewEngine",
             return_value=mock_engine,
         ):
             result = await handler.handle({"session_id": "sess-123", "answer": "Manage tasks"})
@@ -822,7 +822,7 @@ class TestGenerateSeedHandlerAmbiguity:
 
         with (
             patch(
-                "ouroboros.mcp.tools.handlers.interview.AmbiguityScorer",
+                "ouroboros.mcp.tools.definitions.AmbiguityScorer",
                 return_value=mock_scorer,
             ) as mock_scorer_cls,
         ):
@@ -880,7 +880,7 @@ class TestGenerateSeedHandlerAmbiguity:
 
         with (
             patch(
-                "ouroboros.mcp.tools.handlers.interview.AmbiguityScorer",
+                "ouroboros.mcp.tools.definitions.AmbiguityScorer",
             ) as mock_scorer_cls,
         ):
             await handler.handle({"session_id": "sess-123"})

@@ -539,7 +539,7 @@ def create_ouroboros_server(
     dependency injection to tool handlers.
 
     Services created:
-    - LiteLLMAdapter: LLM provider adapter
+    - AnthropicAdapter: LLM provider adapter
     - EventStore: Event persistence (optional, defaults to SQLite)
     - InterviewEngine: Interactive interview for requirements
     - SeedGenerator: Converts interviews to immutable Seeds

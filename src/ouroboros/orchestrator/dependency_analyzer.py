@@ -146,7 +146,7 @@ class DependencyAnalyzer:
         """Initialize analyzer.
 
         Args:
-            llm_adapter: LLM adapter for dependency analysis (LiteLLMAdapter or ClaudeCodeAdapter).
+            llm_adapter: LLM adapter for dependency analysis (AnthropicAdapter or ClaudeCodeAdapter).
                         If None, creates default ClaudeCodeAdapter.
             model: Model to use for analysis. If None, uses adapter's default.
         """

@@ -40,7 +40,7 @@ from ouroboros.observability.logging import get_logger
 from ouroboros.routing.complexity import TaskContext, estimate_complexity
 
 if TYPE_CHECKING:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
+    from ouroboros.providers.base import LLMAdapter
 
 log = get_logger(__name__)
 
@@ -308,7 +308,7 @@ def _heuristic_atomicity_check(
 
 async def check_atomicity(
     ac_content: str,
-    llm_adapter: LiteLLMAdapter,
+    llm_adapter: LLMAdapter,
     criteria: AtomicityCriteria | None = None,
     *,
     use_llm: bool = True,

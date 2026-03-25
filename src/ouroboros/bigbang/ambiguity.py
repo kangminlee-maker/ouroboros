@@ -20,12 +20,7 @@ import structlog
 from ouroboros.bigbang.interview import InterviewState
 from ouroboros.core.errors import ProviderError
 from ouroboros.core.types import Result
-from ouroboros.providers.base import CompletionConfig, Message, MessageRole
-
-try:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
-except ImportError:
-    LiteLLMAdapter = None  # type: ignore[assignment,misc]
+from ouroboros.providers.base import CompletionConfig, LLMAdapter, Message, MessageRole
 
 log = structlog.get_logger()
 
@@ -138,7 +133,7 @@ class AmbiguityScorer:
         max_retries: Maximum retry attempts, or None for unlimited (default).
 
     Example:
-        scorer = AmbiguityScorer(llm_adapter=LiteLLMAdapter())
+        scorer = AmbiguityScorer(llm_adapter=AnthropicAdapter())
 
         result = await scorer.score(interview_state)
         if result.is_ok:
@@ -151,7 +146,7 @@ class AmbiguityScorer:
                 questions = scorer.generate_clarification_questions(ambiguity.breakdown)
     """
 
-    llm_adapter: LiteLLMAdapter
+    llm_adapter: LLMAdapter
     model: str = DEFAULT_MODEL
     temperature: float = SCORING_TEMPERATURE
     initial_max_tokens: int = 2048

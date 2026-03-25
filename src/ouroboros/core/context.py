@@ -4,7 +4,7 @@ This module provides context size monitoring, compression, and preservation
 of critical information during long-running workflows.
 
 Key features:
-- Token counting using LiteLLM
+- Token counting using character-based approximation
 - Automatic compression when context exceeds limits (100K tokens or 6 hours)
 - Preservation of critical info (seed, current AC, recent history, key facts)
 - Fallback to aggressive truncation on compression failures
@@ -21,17 +21,7 @@ import structlog
 
 from ouroboros.core.errors import ProviderError
 from ouroboros.core.types import Result
-from ouroboros.providers.base import CompletionConfig, Message, MessageRole
-
-try:
-    import litellm
-except ImportError:
-    litellm = None  # type: ignore[assignment]
-
-try:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
-except ImportError:
-    LiteLLMAdapter = None  # type: ignore[assignment,misc]
+from ouroboros.providers.base import CompletionConfig, LLMAdapter, Message, MessageRole
 
 log = structlog.get_logger()
 
@@ -156,30 +146,21 @@ class FilteredContext:
     recent_history: list[dict[str, Any]] = field(default_factory=list)
 
 
-def count_tokens(text: str, model: str = "gpt-4") -> int:
-    """Count tokens in text using LiteLLM's token counter.
+def count_tokens(text: str, model: str = "gpt-4") -> int:  # noqa: ARG001
+    """Count tokens in text using character-based approximation.
+
+    Uses a rough estimate of ~4 characters per token.
+    For more accurate counting, use tiktoken or a provider-specific tokenizer.
 
     Args:
         text: The text to count tokens for.
-        model: The model to use for tokenization. Default 'gpt-4'.
+        model: The model identifier (reserved for future use).
 
     Returns:
-        The number of tokens in the text.
+        The approximate number of tokens in the text.
     """
-    if litellm is None:
-        return len(text) // 4
-
-    try:
-        return litellm.token_counter(model=model, text=text)
-    except Exception as e:
-        # Fallback to rough estimation if token counting fails
-        log.warning(
-            "context.token_count.failed",
-            error=str(e),
-            using_fallback=True,
-        )
-        # Rough estimate: ~4 characters per token
-        return len(text) // 4
+    # Rough estimate: ~4 characters per token
+    return len(text) // 4
 
 
 def count_context_tokens(context: WorkflowContext, model: str = "gpt-4") -> int:
@@ -233,7 +214,7 @@ def get_context_metrics(context: WorkflowContext, model: str = "gpt-4") -> Conte
 
 async def compress_context_with_llm(
     context: WorkflowContext,
-    llm_adapter: LiteLLMAdapter,
+    llm_adapter: LLMAdapter,
     model: str = "gpt-4",
 ) -> Result[str, ProviderError]:
     """Compress context using LLM summarization.
@@ -306,7 +287,7 @@ Keep the summary focused and factual. Omit unnecessary details."""
 
 async def compress_context(
     context: WorkflowContext,
-    llm_adapter: LiteLLMAdapter,
+    llm_adapter: LLMAdapter,
     model: str = "gpt-4",
 ) -> Result[CompressionResult, str]:
     """Compress a workflow context when it exceeds limits.

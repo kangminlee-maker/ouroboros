@@ -47,7 +47,7 @@ from ouroboros.resilience.stagnation import (
 )
 
 if TYPE_CHECKING:
-    from ouroboros.providers.litellm_adapter import LiteLLMAdapter
+    from ouroboros.providers.base import LLMAdapter
 
 log = get_logger(__name__)
 
@@ -439,7 +439,7 @@ class DoubleDiamond:
 
     def __init__(
         self,
-        llm_adapter: LiteLLMAdapter,
+        llm_adapter: LLMAdapter,
         *,
         default_model: str | None = None,
         temperature: float | None = None,

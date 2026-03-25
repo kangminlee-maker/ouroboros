@@ -105,7 +105,7 @@ class LLMAdapter(Protocol):
     interface for making completion requests.
 
     Example:
-        adapter: LLMAdapter = LiteLLMAdapter(api_key="...")
+        adapter: LLMAdapter = AnthropicAdapter(api_key="...")
         result = await adapter.complete(
             messages=[Message(role=MessageRole.USER, content="Hello!")],
             config=CompletionConfig(model="openrouter/openai/gpt-4"),

@@ -138,7 +138,7 @@ class InterviewEngine:
 
     Example:
         engine = InterviewEngine(
-            llm_adapter=LiteLLMAdapter(),
+            llm_adapter=AnthropicAdapter(),
             state_dir=Path.home() / ".ouroboros" / "data",
         )
 

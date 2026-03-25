@@ -1,7 +1,7 @@
 """Ouroboros core module - shared types, errors, and protocols.
 
 Note: context.py (WorkflowContext, compress_context, etc.) is intentionally
-NOT re-exported here. It depends on providers/ (LiteLLMAdapter) which violates
+NOT re-exported here. It depends on providers/ (LLMAdapter) which violates
 the core layer's position as the lowest dependency layer. Import directly from
 ouroboros.core.context when needed.
 """
