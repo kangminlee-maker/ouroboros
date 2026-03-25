@@ -173,8 +173,13 @@ class AnthropicAdapter:
             "messages": api_messages,
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
-            "top_p": config.top_p,
         }
+
+        # Anthropic API does not allow temperature and top_p simultaneously.
+        # Only include top_p when explicitly set (not the default 1.0).
+        if config.top_p != 1.0:
+            kwargs.pop("temperature", None)
+            kwargs["top_p"] = config.top_p
 
         if system_parts:
             kwargs["system"] = "\n\n".join(system_parts)
