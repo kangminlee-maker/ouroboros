@@ -129,7 +129,8 @@ Phase 5: Secondary Loop ──> Process deferred TODOs
 | File | Purpose |
 |------|---------|
 | `base.py` | `LLMAdapter` protocol, `CompletionConfig`, `Message` |
-| `litellm_adapter.py` | LiteLLM implementation (100+ model support) |
+| `anthropic_adapter.py` | Anthropic implementation (default) |
+| `litellm_adapter.py` | LiteLLM implementation (optional, 100+ model support) |
 
 ### persistence/ -- Event Sourcing
 

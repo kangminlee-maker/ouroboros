@@ -518,8 +518,8 @@ ouroboros run seed.yaml --no-orchestrator
 | Variable | Description |
 |----------|-------------|
 | `ANTHROPIC_API_KEY` | Anthropic API key for the Anthropic adapter |
-| `OPENROUTER_API_KEY` | OpenRouter API key (optional, for LiteLLM multi-provider support) |
-| `OPENAI_API_KEY` | OpenAI API key (optional, for LiteLLM multi-provider support) |
+| `OPENROUTER_API_KEY` | OpenRouter API key (optional LiteLLM adapter only — not used by default Anthropic adapter) |
+| `OPENAI_API_KEY` | OpenAI API key (optional LiteLLM adapter only — not used by default Anthropic adapter) |
 
 ---
 

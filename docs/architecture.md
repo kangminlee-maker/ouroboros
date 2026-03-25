@@ -471,7 +471,7 @@ ouroboros run --mcp-config mcp.yaml seed.yaml
 
 LLM calls go through the Anthropic SDK by default (AnthropicAdapter). LiteLLM is available as an optional adapter for multi-provider support:
 - **Anthropic adapter (default)** — direct Anthropic API access
-- **LiteLLM adapter (optional)** — provider abstraction (100+ models)
+- **LiteLLM adapter (optional)** — provider abstraction (100+ models; supply chain incident — use with caution)
 - Automatic retries
 - Cost tracking
 - Streaming support

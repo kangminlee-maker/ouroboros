@@ -309,7 +309,7 @@ src/ouroboros/
 ├── persistence/    Event Sourcing (SQLAlchemy + aiosqlite), 체크포인트
 ├── orchestrator/   Claude Agent SDK 통합, 세션 관리
 ├── core/           타입, 에러, Seed, 온톨로지, 보안
-├── providers/      LiteLLM 어댑터 (100+ 모델)
+├── providers/      Anthropic 어댑터 (기본), LiteLLM 선택적 (100+ 모델)
 ├── mcp/            Claude Code용 MCP 클라이언트/서버
 ├── plugin/         Claude Code 플러그인 시스템
 ├── tui/            터미널 UI 대시보드

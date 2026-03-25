@@ -341,10 +341,6 @@ class ConvergenceCriteria:
             generation=current_gen,
         )
 
-    def _completed_generations(self, lineage: OntologyLineage) -> tuple[GenerationRecord, ...]:
-        """Return only completed generations for convergence calculations."""
-        return tuple(g for g in lineage.generations if g.phase == GenerationPhase.COMPLETED)
-
     def _latest_similarity(self, lineage: OntologyLineage) -> float:
         """Compute similarity between the last two completed generations."""
         gens = self._completed_generations(lineage)

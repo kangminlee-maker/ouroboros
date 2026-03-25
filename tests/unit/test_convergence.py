@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from ouroboros.core.lineage import (
+    ACResult,
     EvaluationSummary,
     GenerationPhase,
     GenerationRecord,
@@ -1139,6 +1140,88 @@ class TestWonderGate:
         )
         signal = criteria.evaluate(lineage, latest_wonder=wonder)
         assert signal.converged
+
+
+# --- Regression Gate ---
+
+
+class TestRegressionGate:
+    """Tests for regression_gate in convergence criteria."""
+
+    @staticmethod
+    def _lineage_with_regression() -> OntologyLineage:
+        """Create a lineage where AC1 passed in gen2 but failed in gen3."""
+        schema_a = _schema(("x",))
+        schema_b = _schema(("name", "age", "email"))
+        return OntologyLineage(
+            lineage_id="test",
+            goal="test",
+            generations=(
+                GenerationRecord(
+                    generation_number=1,
+                    seed_id="s1",
+                    ontology_snapshot=schema_a,
+                ),
+                GenerationRecord(
+                    generation_number=2,
+                    seed_id="s2",
+                    ontology_snapshot=schema_b,
+                    evaluation_summary=EvaluationSummary(
+                        score=0.9,
+                        final_approved=True,
+                        highest_stage_passed=3,
+                        ac_results=(
+                            ACResult(ac_index=0, ac_content="AC1", passed=True),
+                            ACResult(ac_index=1, ac_content="AC2", passed=True),
+                        ),
+                    ),
+                ),
+                GenerationRecord(
+                    generation_number=3,
+                    seed_id="s3",
+                    ontology_snapshot=schema_b,
+                    evaluation_summary=EvaluationSummary(
+                        score=0.8,
+                        final_approved=True,
+                        highest_stage_passed=3,
+                        ac_results=(
+                            ACResult(ac_index=0, ac_content="AC1", passed=True),
+                            ACResult(ac_index=1, ac_content="AC2", passed=False),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def test_blocks_when_ac_regressed(self) -> None:
+        """Regression gate blocks convergence when an AC regresses."""
+        lineage = self._lineage_with_regression()
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            regression_gate_enabled=True,
+            wonder_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+        )
+        signal = criteria.evaluate(lineage)
+        assert not signal.converged
+        assert "Regression" in signal.reason
+        assert signal.blocking_gate == "regression"
+
+    def test_disabled_allows_convergence(self) -> None:
+        """Disabled regression gate allows convergence even with regressions."""
+        lineage = self._lineage_with_regression()
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            regression_gate_enabled=False,
+            wonder_gate_enabled=False,
+            ontology_completeness_gate_enabled=False,
+        )
+        signal = criteria.evaluate(lineage)
+        # With regression gate disabled, convergence should proceed
+        # (other gates may still block, but not regression)
+        assert signal.blocking_gate != "regression"
 
 
 # --- Drift Trend Gate ---
