@@ -903,15 +903,21 @@ class TestWonderGate:
             goal="test",
             generations=(
                 GenerationRecord(
-                    generation_number=1, seed_id="s1", ontology_snapshot=schema_a,
+                    generation_number=1,
+                    seed_id="s1",
+                    ontology_snapshot=schema_a,
                     wonder_questions=prev_questions,
                 ),
                 GenerationRecord(
-                    generation_number=2, seed_id="s2", ontology_snapshot=schema_b,
+                    generation_number=2,
+                    seed_id="s2",
+                    ontology_snapshot=schema_b,
                     wonder_questions=prev_questions,
                 ),
                 GenerationRecord(
-                    generation_number=3, seed_id="s3", ontology_snapshot=schema_b,
+                    generation_number=3,
+                    seed_id="s3",
+                    ontology_snapshot=schema_b,
                     wonder_questions=prev_questions,
                 ),
             ),
@@ -992,16 +998,22 @@ class TestDriftTrendGate:
         schema = _schema(("name", "age", "email"))
         gens: list[GenerationRecord] = [
             GenerationRecord(
-                generation_number=1, seed_id="s1", ontology_snapshot=schema_init,
+                generation_number=1,
+                seed_id="s1",
+                ontology_snapshot=schema_init,
             )
         ]
         for i, ds in enumerate(drift_scores, start=2):
-            eval_summary = EvaluationSummary(
-                final_approved=True,
-                highest_stage_passed=2,
-                score=0.8,
-                drift_score=ds,
-            ) if ds is not None else None
+            eval_summary = (
+                EvaluationSummary(
+                    final_approved=True,
+                    highest_stage_passed=2,
+                    score=0.8,
+                    drift_score=ds,
+                )
+                if ds is not None
+                else None
+            )
             gens.append(
                 GenerationRecord(
                     generation_number=i,

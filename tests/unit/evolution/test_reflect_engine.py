@@ -28,9 +28,7 @@ def _make_seed(**overrides) -> Seed:
         "ontology_schema": OntologySchema(
             name="TaskManager",
             description="A task management system",
-            fields=(
-                OntologyField(name="task", field_type="entity", description="A work item"),
-            ),
+            fields=(OntologyField(name="task", field_type="entity", description="A work item"),),
         ),
         "metadata": SeedMetadata(),
     }
@@ -51,7 +49,7 @@ class TestParseResponse:
             '"ontology_mutations": ['
             '  {"action": "add", "field_name": "priority", "field_type": "enum", '
             '   "description": "Task priority level", "reason": "Missing from ontology"}'
-            '], '
+            "], "
             '"reasoning": "Priority was identified as a gap"}',
             seed,
         )

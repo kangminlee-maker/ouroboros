@@ -41,9 +41,7 @@ class ConvergenceSignal:
 
     def __post_init__(self) -> None:
         if self.converged and self.termination_reason is None:
-            raise ValueError(
-                "converged=True requires termination_reason to be set"
-            )
+            raise ValueError("converged=True requires termination_reason to be set")
 
 
 @dataclass
@@ -403,8 +401,7 @@ class ConvergenceCriteria:
         scores = [
             g.evaluation_summary.drift_score
             for g in recent
-            if g.evaluation_summary is not None
-            and g.evaluation_summary.drift_score is not None
+            if g.evaluation_summary is not None and g.evaluation_summary.drift_score is not None
         ]
 
         if len(scores) < 2:

@@ -351,9 +351,7 @@ class EvolutionaryLoop:
                     },
                 )
 
-                lineage = await self._emit_termination(
-                    signal, lineage, generation_number
-                )
+                lineage = await self._emit_termination(signal, lineage, generation_number)
                 break
 
             # Prepare for next generation
@@ -602,9 +600,7 @@ class EvolutionaryLoop:
 
         action = StepAction.CONTINUE
         if signal.converged:
-            lineage, action = await self._emit_termination_step(
-                signal, lineage, generation_number
-            )
+            lineage, action = await self._emit_termination_step(signal, lineage, generation_number)
 
         return Result.ok(
             StepResult(

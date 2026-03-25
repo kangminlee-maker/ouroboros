@@ -32,9 +32,7 @@ def _extract_event_types_from_factories(path: Path) -> set[str]:
     types: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "type":
-            if isinstance(node.value, ast.Constant) and isinstance(
-                node.value.value, str
-            ):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 types.add(node.value.value)
     return types
 
@@ -78,8 +76,7 @@ class TestMatrixCompleteness:
             all_matrix_types |= allowed
         for event_type in TERMINAL_EVENT_STATUS:
             assert event_type in all_matrix_types, (
-                f"TERMINAL_EVENT_STATUS key '{event_type}' not found in any "
-                f"ALLOWED_TRANSITIONS set"
+                f"TERMINAL_EVENT_STATUS key '{event_type}' not found in any ALLOWED_TRANSITIONS set"
             )
 
 
@@ -140,9 +137,7 @@ class TestExhaustedTransitions:
         assert is_transition_allowed(LineageStatus.EXHAUSTED, "lineage.rewound")
 
     def test_exhausted_rejects_generation_started(self) -> None:
-        assert not is_transition_allowed(
-            LineageStatus.EXHAUSTED, "lineage.generation.started"
-        )
+        assert not is_transition_allowed(LineageStatus.EXHAUSTED, "lineage.generation.started")
 
 
 # --- ABORTED state ---
