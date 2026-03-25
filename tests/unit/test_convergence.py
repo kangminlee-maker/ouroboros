@@ -941,6 +941,52 @@ class TestWonderGate:
         assert "Wonder gate" in signal.reason
         assert "novel questions" in signal.reason
 
+    def test_blocks_when_latest_gen_has_same_questions(self) -> None:
+        """Wonder gate still blocks even when latest generation already contains the questions.
+
+        Regression test: the gate must exclude the latest generation when building
+        the set of previously-seen questions, otherwise every question appears
+        "already seen" and the gate can never fire.
+        """
+        schema_a = _schema(("x",))
+        schema_b = _schema(("name", "age", "email"))
+        novel_qs = ("brand new A", "brand new B")
+        # Gen1-2 have old questions; gen3 (latest) has the novel questions
+        lineage = OntologyLineage(
+            lineage_id="test",
+            goal="test",
+            generations=(
+                GenerationRecord(
+                    generation_number=1,
+                    seed_id="s1",
+                    ontology_snapshot=schema_a,
+                    wonder_questions=("old Q1",),
+                ),
+                GenerationRecord(
+                    generation_number=2,
+                    seed_id="s2",
+                    ontology_snapshot=schema_b,
+                    wonder_questions=("old Q2",),
+                ),
+                GenerationRecord(
+                    generation_number=3,
+                    seed_id="s3",
+                    ontology_snapshot=schema_b,
+                    wonder_questions=novel_qs,
+                ),
+            ),
+        )
+        wonder = WonderOutput(questions=novel_qs, should_continue=True)
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            wonder_gate_enabled=True,
+            wonder_novelty_threshold=0.5,
+        )
+        signal = criteria.evaluate(lineage, latest_wonder=wonder)
+        assert not signal.converged
+        assert "Wonder gate" in signal.reason
+
     def test_allows_when_all_questions_are_repeated(self) -> None:
         """Wonder gate allows convergence when all questions are old."""
         prev = ("question A", "question B")

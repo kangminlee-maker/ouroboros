@@ -429,8 +429,11 @@ class ConvergenceCriteria:
         if not latest_wonder.questions:
             return None
 
+        # Exclude the latest generation — its questions are the ones being
+        # evaluated via latest_wonder, so including them would make every
+        # question appear "already seen" and the gate would never block.
         prev_questions: set[str] = set()
-        for gen in lineage.generations:
+        for gen in lineage.generations[:-1]:
             prev_questions.update(gen.wonder_questions)
 
         novel = [q for q in latest_wonder.questions if q not in prev_questions]
