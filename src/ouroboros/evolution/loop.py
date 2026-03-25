@@ -351,9 +351,7 @@ class EvolutionaryLoop:
                     },
                 )
 
-                lineage = await self._emit_termination(
-                    signal, lineage, generation_number
-                )
+                lineage = await self._emit_termination(signal, lineage, generation_number)
                 break
 
             # Prepare for next generation
@@ -426,7 +424,11 @@ class EvolutionaryLoop:
                 return Result.err(OuroborosError("Failed to project lineage from events"))
 
             # Check if lineage is already terminated
-            if lineage.status in (LineageStatus.CONVERGED, LineageStatus.EXHAUSTED):
+            if lineage.status in (
+                LineageStatus.CONVERGED,
+                LineageStatus.EXHAUSTED,
+                LineageStatus.ABORTED,
+            ):
                 return Result.err(
                     OuroborosError(
                         f"Lineage already terminated with status: {lineage.status.value}"
@@ -602,9 +604,7 @@ class EvolutionaryLoop:
 
         action = StepAction.CONTINUE
         if signal.converged:
-            lineage, action = await self._emit_termination_step(
-                signal, lineage, generation_number
-            )
+            lineage, action = await self._emit_termination_step(signal, lineage, generation_number)
 
         return Result.ok(
             StepResult(
@@ -616,6 +616,16 @@ class EvolutionaryLoop:
             )
         )
 
+    # Dispatch table: TerminationReason → (event_factory_key, LineageStatus)
+    # event_factory_key: "exhausted", "stagnated", or "converged"
+    _TERMINATION_DISPATCH: dict[TerminationReason, tuple[str, LineageStatus]] = {
+        TerminationReason.EXHAUSTED: ("exhausted", LineageStatus.EXHAUSTED),
+        TerminationReason.STAGNATED: ("stagnated", LineageStatus.CONVERGED),
+        TerminationReason.OSCILLATED: ("stagnated", LineageStatus.CONVERGED),
+        TerminationReason.REPETITIVE: ("stagnated", LineageStatus.CONVERGED),
+        TerminationReason.CONVERGED: ("converged", LineageStatus.CONVERGED),
+    }
+
     async def _emit_termination(
         self,
         signal: ConvergenceSignal,
@@ -624,65 +634,48 @@ class EvolutionaryLoop:
     ) -> OntologyLineage:
         """Emit termination event and update lineage status. Used by run()."""
         tr = signal.termination_reason
+        dispatch = self._TERMINATION_DISPATCH.get(tr)
 
-        if tr == TerminationReason.EXHAUSTED:
-            await self._guard.gated_append(
-                lineage_exhausted(
-                    lineage.lineage_id,
-                    generation_number,
-                    self.config.max_generations,
-                    termination_reason=str(tr),
-                )
+        if dispatch is None:
+            # Defensive: unknown TerminationReason falls back to CONVERGED
+            logger.warning(
+                "evolution.termination.unknown_reason",
+                extra={
+                    "termination_reason": str(tr),
+                    "lineage_id": lineage.lineage_id,
+                    "generation": generation_number,
+                },
             )
-            return lineage.with_status(LineageStatus.EXHAUSTED, termination_reason=tr)
+            dispatch = ("converged", LineageStatus.CONVERGED)
 
-        if tr in (
-            TerminationReason.STAGNATED,
-            TerminationReason.OSCILLATED,
-            TerminationReason.REPETITIVE,
-        ):
-            await self._guard.gated_append(
-                lineage_stagnated(
-                    lineage.lineage_id,
-                    generation_number,
-                    signal.reason,
-                    self.config.stagnation_window,
-                    termination_reason=str(tr),
-                )
+        event_key, target_status = dispatch
+
+        if event_key == "exhausted":
+            event = lineage_exhausted(
+                lineage.lineage_id,
+                generation_number,
+                self.config.max_generations,
+                termination_reason=str(tr),
             )
-            return lineage.with_status(LineageStatus.CONVERGED, termination_reason=tr)
-
-        if tr == TerminationReason.CONVERGED:
-            await self._guard.gated_append(
-                lineage_converged(
-                    lineage.lineage_id,
-                    generation_number,
-                    signal.reason,
-                    signal.ontology_similarity,
-                    termination_reason=str(tr),
-                )
+        elif event_key == "stagnated":
+            event = lineage_stagnated(
+                lineage.lineage_id,
+                generation_number,
+                signal.reason,
+                self.config.stagnation_window,
+                termination_reason=str(tr),
             )
-            return lineage.with_status(LineageStatus.CONVERGED, termination_reason=tr)
-
-        # Defensive: unknown TerminationReason falls back to CONVERGED with warning
-        logger.warning(
-            "evolution.termination.unknown_reason",
-            extra={
-                "termination_reason": str(tr),
-                "lineage_id": lineage.lineage_id,
-                "generation": generation_number,
-            },
-        )
-        await self._guard.gated_append(
-            lineage_converged(
+        else:  # converged
+            event = lineage_converged(
                 lineage.lineage_id,
                 generation_number,
                 signal.reason,
                 signal.ontology_similarity,
                 termination_reason=str(tr),
             )
-        )
-        return lineage.with_status(LineageStatus.CONVERGED, termination_reason=tr)
+
+        await self._guard.gated_append(event)
+        return lineage.with_status(target_status, termination_reason=tr)
 
     async def _emit_termination_step(
         self,

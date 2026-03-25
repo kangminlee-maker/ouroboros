@@ -369,9 +369,7 @@ def _parse_insight_response(response_text: str) -> OntologicalInsight | None:
         )
 
         boundary_raw = data.get("boundary", [])
-        boundary = (
-            tuple(str(b) for b in boundary_raw) if isinstance(boundary_raw, list) else ()
-        )
+        boundary = tuple(str(b) for b in boundary_raw) if isinstance(boundary_raw, list) else ()
 
         existing_raw = data.get("existing_context", [])
         existing_context = (

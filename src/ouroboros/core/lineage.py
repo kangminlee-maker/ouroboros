@@ -229,7 +229,7 @@ class OntologyLineage(BaseModel, frozen=True):
     generations: tuple[GenerationRecord, ...] = Field(default_factory=tuple)
     rewind_history: tuple[RewindRecord, ...] = Field(default_factory=tuple)
     status: LineageStatus = LineageStatus.ACTIVE
-    termination_reason: TerminationReason | str | None = None
+    termination_reason: TerminationReason | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
@@ -249,12 +249,14 @@ class OntologyLineage(BaseModel, frozen=True):
     def with_status(
         self,
         status: LineageStatus,
-        termination_reason: TerminationReason | str | None = None,
+        termination_reason: TerminationReason | None = None,
     ) -> OntologyLineage:
-        """Return new lineage with updated status and optional termination reason."""
-        updates: dict = {"status": status}
-        if termination_reason is not None:
-            updates["termination_reason"] = termination_reason
+        """Return new lineage with updated status and optional termination reason.
+
+        When transitioning to a non-terminal status (e.g. ACTIVE after rewind),
+        termination_reason is cleared to None to avoid stale metadata.
+        """
+        updates: dict = {"status": status, "termination_reason": termination_reason}
         return self.model_copy(update=updates)
 
     def rewind_to(self, generation_number: int) -> OntologyLineage:
@@ -284,5 +286,6 @@ class OntologyLineage(BaseModel, frozen=True):
             update={
                 "generations": truncated,
                 "status": LineageStatus.ACTIVE,
+                "termination_reason": None,
             }
         )

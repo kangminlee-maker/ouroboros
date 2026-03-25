@@ -8,10 +8,8 @@ drops when new lineage events are added without updating the projector.
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
-
-import pytest
+import re
 
 # --- Paths ---
 _SRC = Path(__file__).resolve().parents[3] / "src" / "ouroboros"
@@ -26,9 +24,7 @@ def _extract_event_types_from_factories(path: Path) -> set[str]:
     types: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.keyword) and node.arg == "type":
-            if isinstance(node.value, ast.Constant) and isinstance(
-                node.value.value, str
-            ):
+            if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 types.add(node.value.value)
     return types
 
@@ -39,7 +35,7 @@ def _extract_handled_types_from_projector(path: Path) -> set[str]:
     # Match event.type == "..."
     types = set(re.findall(r'event\.type\s*==\s*"([^"]+)"', source))
     # Match event.type in ("...", "...", ...)
-    in_matches = re.findall(r'event\.type\s+in\s*\(([^)]+)\)', source)
+    in_matches = re.findall(r"event\.type\s+in\s*\(([^)]+)\)", source)
     for match in in_matches:
         types |= set(re.findall(r'"([^"]+)"', match))
     return types

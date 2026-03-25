@@ -863,7 +863,7 @@ class TestOntologyCompletenessGate:
             description="Test schema",
             fields=tuple(
                 OntologyField(name=n, field_type="string", description=d, required=True)
-                for n, d in zip(fields, descriptions)
+                for n, d in zip(fields, descriptions, strict=True)
             ),
         )
         return OntologyLineage(
@@ -997,15 +997,21 @@ class TestWonderGate:
             goal="test",
             generations=(
                 GenerationRecord(
-                    generation_number=1, seed_id="s1", ontology_snapshot=schema_a,
+                    generation_number=1,
+                    seed_id="s1",
+                    ontology_snapshot=schema_a,
                     wonder_questions=prev_questions,
                 ),
                 GenerationRecord(
-                    generation_number=2, seed_id="s2", ontology_snapshot=schema_b,
+                    generation_number=2,
+                    seed_id="s2",
+                    ontology_snapshot=schema_b,
                     wonder_questions=prev_questions,
                 ),
                 GenerationRecord(
-                    generation_number=3, seed_id="s3", ontology_snapshot=schema_b,
+                    generation_number=3,
+                    seed_id="s3",
+                    ontology_snapshot=schema_b,
                     wonder_questions=prev_questions,
                 ),
             ),
@@ -1031,6 +1037,53 @@ class TestWonderGate:
         assert "Wonder gate" in signal.reason
         assert "novel questions" in signal.reason
 
+    def test_blocks_when_latest_gen_has_same_questions(self) -> None:
+        """Wonder gate still blocks even when latest generation already contains the questions.
+
+        Regression test: the gate must exclude the latest generation when building
+        the set of previously-seen questions, otherwise every question appears
+        "already seen" and the gate can never fire.
+        """
+        schema_a = _schema(("x",))
+        schema_b = _schema(("name", "age", "email"))
+        novel_qs = ("brand new A", "brand new B")
+        # Gen1-2 have old questions; gen3 (latest) has the novel questions
+        lineage = OntologyLineage(
+            lineage_id="test",
+            goal="test",
+            generations=(
+                GenerationRecord(
+                    generation_number=1,
+                    seed_id="s1",
+                    ontology_snapshot=schema_a,
+                    wonder_questions=("old Q1",),
+                ),
+                GenerationRecord(
+                    generation_number=2,
+                    seed_id="s2",
+                    ontology_snapshot=schema_b,
+                    wonder_questions=("old Q2",),
+                ),
+                GenerationRecord(
+                    generation_number=3,
+                    seed_id="s3",
+                    ontology_snapshot=schema_b,
+                    wonder_questions=novel_qs,
+                ),
+            ),
+        )
+        wonder = WonderOutput(questions=novel_qs, should_continue=True)
+        criteria = ConvergenceCriteria(
+            convergence_threshold=0.95,
+            min_generations=2,
+            wonder_gate_enabled=True,
+            wonder_novelty_threshold=0.5,
+            ontology_completeness_gate_enabled=False,
+        )
+        signal = criteria.evaluate(lineage, latest_wonder=wonder)
+        assert not signal.converged
+        assert "Wonder gate" in signal.reason
+
     def test_allows_when_all_questions_are_repeated(self) -> None:
         """Wonder gate allows convergence when all questions are old."""
         prev = ("question A", "question B")
@@ -1050,8 +1103,13 @@ class TestWonderGate:
         signal = criteria.evaluate(lineage, latest_wonder=wonder)
         assert signal.converged
 
-    def test_allows_when_wonder_is_none(self) -> None:
-        """Wonder gate passes when no wonder output is provided."""
+    def test_blocks_when_wonder_is_none(self) -> None:
+        """Wonder gate blocks when no wonder output is available.
+
+        "Unable to generate questions" is not the same as "no questions remain".
+        When wonder_gate is enabled, absence of wonder output should block
+        convergence to avoid false convergence.
+        """
         lineage = self._stable_lineage_with_wonder()
         criteria = ConvergenceCriteria(
             convergence_threshold=0.95,
@@ -1061,7 +1119,9 @@ class TestWonderGate:
             drift_trend_gate_enabled=False,
         )
         signal = criteria.evaluate(lineage, latest_wonder=None)
-        assert signal.converged
+        assert not signal.converged
+        assert signal.blocking_gate == "wonder"
+        assert "unavailable" in signal.reason
 
     def test_disabled_allows_convergence(self) -> None:
         """Disabled wonder gate allows convergence regardless of novelty."""
@@ -1094,16 +1154,22 @@ class TestDriftTrendGate:
         schema = _schema(("name", "age", "email"))
         gens: list[GenerationRecord] = [
             GenerationRecord(
-                generation_number=1, seed_id="s1", ontology_snapshot=schema_init,
+                generation_number=1,
+                seed_id="s1",
+                ontology_snapshot=schema_init,
             )
         ]
         for i, ds in enumerate(drift_scores, start=2):
-            eval_summary = EvaluationSummary(
-                final_approved=True,
-                highest_stage_passed=2,
-                score=0.8,
-                drift_score=ds,
-            ) if ds is not None else None
+            eval_summary = (
+                EvaluationSummary(
+                    final_approved=True,
+                    highest_stage_passed=2,
+                    score=0.8,
+                    drift_score=ds,
+                )
+                if ds is not None
+                else None
+            )
             gens.append(
                 GenerationRecord(
                     generation_number=i,

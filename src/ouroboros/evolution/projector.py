@@ -179,14 +179,12 @@ class LineageProjector:
                     raw_tr = event.data.get("termination_reason")
                     if raw_tr:
                         try:
-                            tr: TerminationReason | str = TerminationReason(raw_tr)
+                            tr: TerminationReason = TerminationReason(raw_tr)
                         except ValueError:
                             tr = _DEFAULT_TERMINATION[event.type]
                     else:
                         raw_reason = event.data.get("reason", "")
-                        tr = _LEGACY_REASON_MAP.get(
-                            raw_reason, _DEFAULT_TERMINATION[event.type]
-                        )
+                        tr = _LEGACY_REASON_MAP.get(raw_reason, _DEFAULT_TERMINATION[event.type])
                     lineage = lineage.with_status(target_status, termination_reason=tr)
 
             elif event.type == "lineage.rewound":

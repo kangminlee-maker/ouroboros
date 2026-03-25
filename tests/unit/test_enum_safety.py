@@ -7,11 +7,8 @@ enum member is added but not handled.
 
 from __future__ import annotations
 
-import ast
-import re
 from pathlib import Path
-
-import pytest
+import re
 
 from ouroboros.core.lineage import MutationAction, TerminationReason
 
@@ -33,6 +30,22 @@ class TestMutationActionExhaustiveness:
                 f"MutationAction.{member.name} ('{member.value}') is not handled "
                 f"in seed_generator.py _apply_mutations(). "
                 f"Handled actions: {sorted(handled)}"
+            )
+
+
+class TestTerminationReasonDispatchCoverage:
+    """_TERMINATION_DISPATCH must cover all TerminationReason members."""
+
+    def test_dispatch_covers_all_termination_reasons(self) -> None:
+        """Every TerminationReason member has a dispatch entry in loop.py."""
+        from ouroboros.evolution.loop import EvolutionaryLoop
+
+        dispatch = EvolutionaryLoop._TERMINATION_DISPATCH
+        for member in TerminationReason:
+            assert member in dispatch, (
+                f"TerminationReason.{member.name} is not in "
+                f"EvolutionaryLoop._TERMINATION_DISPATCH. "
+                f"Dispatched: {sorted(m.name for m in dispatch)}"
             )
 
 

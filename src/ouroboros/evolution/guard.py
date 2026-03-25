@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 
 from ouroboros.core.errors import TransitionError
-from ouroboros.core.lineage import LineageStatus
 from ouroboros.events.base import BaseEvent
 from ouroboros.evolution.projector import LineageProjector
 from ouroboros.evolution.transitions import is_transition_allowed

@@ -30,6 +30,10 @@ class ConvergenceSignal:
 
     When converged=True, termination_reason must be set to indicate why.
     When converged=False, termination_reason is None (loop continues).
+
+    Note: ``converged`` means "the loop should terminate", NOT "the ontology
+    has converged". EXHAUSTED, STAGNATED, OSCILLATED and REPETITIVE all
+    set converged=True despite not representing true ontological convergence.
     """
 
     converged: bool
@@ -38,12 +42,11 @@ class ConvergenceSignal:
     generation: int
     failed_acs: tuple[int, ...] = ()
     termination_reason: TerminationReason | None = None
+    blocking_gate: str | None = None
 
     def __post_init__(self) -> None:
         if self.converged and self.termination_reason is None:
-            raise ValueError(
-                "converged=True requires termination_reason to be set"
-            )
+            raise ValueError("converged=True requires termination_reason to be set")
 
 
 @dataclass
@@ -152,6 +155,7 @@ class ConvergenceCriteria:
                         ),
                         ontology_similarity=latest_sim,
                         generation=current_gen,
+                        blocking_gate="eval",
                     )
 
             # Per-AC gate: block convergence if individual ACs are failing
@@ -170,6 +174,7 @@ class ConvergenceCriteria:
                         ontology_similarity=latest_sim,
                         generation=current_gen,
                         failed_acs=failed_indices,
+                        blocking_gate="ac",
                     )
 
             # Signal 5: Regression gate — block convergence if ACs regressed
@@ -188,6 +193,7 @@ class ConvergenceCriteria:
                         ontology_similarity=latest_sim,
                         generation=current_gen,
                         failed_acs=regressed,
+                        blocking_gate="regression",
                     )
 
             # Evolution gate: withhold convergence if ontology never actually evolved.
@@ -205,6 +211,7 @@ class ConvergenceCriteria:
                     ),
                     ontology_similarity=latest_sim,
                     generation=current_gen,
+                    blocking_gate="evolution",
                 )
 
             # Ontology completeness gate: block convergence if ontology is structurally thin
@@ -216,9 +223,24 @@ class ConvergenceCriteria:
                         reason=completeness_block,
                         ontology_similarity=latest_sim,
                         generation=current_gen,
+                        blocking_gate="completeness",
                     )
 
-            # Wonder gate: block convergence if Wonder found significant novel questions
+            # Wonder gate: block convergence if Wonder found significant novel questions.
+            # When wonder_gate is enabled but no wonder output is available, block
+            # convergence — "unable to generate questions" is not the same as
+            # "no questions remain" (Ouroboros principle: questions must be answered).
+            if self.wonder_gate_enabled and latest_wonder is None:
+                return ConvergenceSignal(
+                    converged=False,
+                    reason=(
+                        "Wonder gate: wonder output unavailable — cannot confirm "
+                        "no questions remain (wonder_gate_enabled=True)"
+                    ),
+                    ontology_similarity=latest_sim,
+                    generation=current_gen,
+                    blocking_gate="wonder",
+                )
             if self.wonder_gate_enabled and latest_wonder is not None:
                 wonder_block = self._check_wonder_gate(lineage, latest_wonder)
                 if wonder_block is not None:
@@ -227,6 +249,7 @@ class ConvergenceCriteria:
                         reason=wonder_block,
                         ontology_similarity=latest_sim,
                         generation=current_gen,
+                        blocking_gate="wonder",
                     )
 
             # Drift trend gate: block if drift_score is monotonically increasing
@@ -238,6 +261,7 @@ class ConvergenceCriteria:
                         reason=drift_block,
                         ontology_similarity=latest_sim,
                         generation=current_gen,
+                        blocking_gate="drift_trend",
                     )
 
             # Validation gate: block convergence if validation was skipped or failed
@@ -256,6 +280,7 @@ class ConvergenceCriteria:
                         reason=(f"Validation gate blocked: {validation_output}"),
                         ontology_similarity=latest_sim,
                         generation=current_gen,
+                        blocking_gate="validation",
                     )
 
             return ConvergenceSignal(
@@ -385,17 +410,13 @@ class ConvergenceCriteria:
 
         return None
 
-    def _completed_generations(
-        self, lineage: OntologyLineage
-    ) -> tuple[GenerationRecord, ...]:
+    def _completed_generations(self, lineage: OntologyLineage) -> tuple[GenerationRecord, ...]:
         """Return only completed generations for convergence calculations.
 
         Pending/failed generations are excluded because their ontology
         snapshots are placeholders, not real evaluation results.
         """
-        return tuple(
-            g for g in lineage.generations if g.phase == GenerationPhase.COMPLETED
-        )
+        return tuple(g for g in lineage.generations if g.phase == GenerationPhase.COMPLETED)
 
     def _check_drift_trend_gate(self, lineage: OntologyLineage) -> str | None:
         """Block convergence if drift_score shows monotonic increase.
@@ -407,7 +428,7 @@ class ConvergenceCriteria:
         Generations with missing evaluation or drift_score (None) are skipped.
         If fewer than 2 valid scores remain, the gate passes.
         """
-        gens = lineage.generations
+        gens = self._completed_generations(lineage)
         if len(gens) < self.drift_trend_window:
             return None
 
@@ -415,8 +436,7 @@ class ConvergenceCriteria:
         scores = [
             g.evaluation_summary.drift_score
             for g in recent
-            if g.evaluation_summary is not None
-            and g.evaluation_summary.drift_score is not None
+            if g.evaluation_summary is not None and g.evaluation_summary.drift_score is not None
         ]
 
         if len(scores) < 2:
@@ -444,8 +464,11 @@ class ConvergenceCriteria:
         if not latest_wonder.questions:
             return None
 
+        # Exclude the latest generation — its questions are the ones being
+        # evaluated via latest_wonder, so including them would make every
+        # question appear "already seen" and the gate would never block.
         prev_questions: set[str] = set()
-        for gen in lineage.generations:
+        for gen in lineage.generations[:-1]:
             prev_questions.update(gen.wonder_questions)
 
         novel = [q for q in latest_wonder.questions if q not in prev_questions]
