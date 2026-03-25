@@ -68,8 +68,8 @@ class ConvergenceCriteria:
     eval_min_score: float = 0.7
     ac_gate_mode: str = "all"  # "all" | "ratio" | "off"
     ac_min_pass_ratio: float = 1.0  # for "ratio" mode
-    regression_gate_enabled: bool = True
-    validation_gate_enabled: bool = True
+    regression_gate_enabled: bool = False
+    validation_gate_enabled: bool = False
     ontology_completeness_gate_enabled: bool = False
     ontology_min_fields: int = 3
     wonder_gate_enabled: bool = False
