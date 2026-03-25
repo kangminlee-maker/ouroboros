@@ -136,7 +136,7 @@ def _get_adapter(
     """Get the appropriate LLM adapter.
 
     Args:
-        use_orchestrator: If True, use Claude Code (Max Plan). Otherwise LiteLLM.
+        use_orchestrator: If True, use Claude Code (Max Plan). Otherwise Anthropic API.
         for_interview: If True, enable Read/Glob/Grep tools for codebase exploration.
         debug: If True, show streaming messages (thinking, tool use).
 
@@ -258,7 +258,7 @@ async def _run_interview(
         initial_context: Initial context or idea for the interview.
         resume_id: Optional interview ID to resume.
         state_dir: Optional custom state directory.
-        use_orchestrator: If True, use Claude Code (Max Plan) instead of LiteLLM.
+        use_orchestrator: If True, use Claude Code (Max Plan) instead of Anthropic API.
     """
     # Initialize components
     llm_adapter = _get_adapter(use_orchestrator, for_interview=True, debug=debug)
@@ -496,7 +496,7 @@ def start(
         typer.Option(
             "--orchestrator",
             "-o",
-            help="Use Claude Code (Max Plan) instead of LiteLLM. No API key required.",
+            help="Use Claude Code (Max Plan) instead of Anthropic API. No API key required.",
         ),
     ] = False,
     debug: Annotated[
@@ -545,10 +545,19 @@ def start(
         configure_logging(LoggingConfig(log_level="DEBUG"))
         print_info("Debug mode enabled - showing verbose logs")
 
-    # Show mode info
+    # Show mode info and validate API key early
     if orchestrator:
         print_info("Using Claude Code (Max Plan) - no API key required")
     else:
+        import os
+
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            print_error(
+                "ANTHROPIC_API_KEY not set. "
+                "Export it with: export ANTHROPIC_API_KEY=sk-ant-... "
+                "or use --orchestrator flag for Claude Code (no API key required)."
+            )
+            raise typer.Exit(code=1)
         print_info("Using Anthropic API - API key required")
 
     # Run interview

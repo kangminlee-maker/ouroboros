@@ -525,7 +525,7 @@ class DeliberativeConsensus:
 
     def __init__(
         self,
-        llm_adapter: LiteLLMAdapter,
+        llm_adapter: LLMAdapter,
         ontology_aspect: OntologicalAspect | None = None,
     ):
         self._llm = llm_adapter

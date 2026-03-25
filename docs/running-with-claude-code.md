@@ -136,7 +136,7 @@ The orchestrator uses `claude-agent-sdk` which connects directly to your authent
 # Start interactive interview (Claude Code)
 uv run ouroboros init start --orchestrator "Your idea here"
 
-# Start interactive interview (LiteLLM - needs API key)
+# Start interactive interview (Anthropic API - needs API key)
 uv run ouroboros init start "Your idea here"
 
 # Resume an interrupted interview
@@ -178,7 +178,7 @@ uv run ouroboros run workflow --orchestrator --resume <session_id> seed.yaml
 
 ### "Providers: warning" in health check
 
-This is normal when not using LiteLLM providers. The orchestrator mode uses Claude Code directly.
+This is normal when not using external API providers. The orchestrator mode uses Claude Code directly.
 
 ### Session fails with empty error
 

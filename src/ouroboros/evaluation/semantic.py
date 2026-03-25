@@ -5,7 +5,7 @@ LLM-based semantic evaluation using Standard tier:
 - Goal Alignment: Alignment with original goal
 - Drift Measurement: Deviation from seed intent
 
-The SemanticEvaluator uses the LiteLLM adapter for LLM calls.
+The SemanticEvaluator uses the injected LLM adapter for LLM calls.
 """
 
 from dataclasses import dataclass

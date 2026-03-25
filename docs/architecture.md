@@ -323,7 +323,8 @@ src/ouroboros/
 |
 +-- providers/      # LLM provider adapters
 |   +-- base.py        # Provider protocol
-|   +-- litellm_adapter.py  # LiteLLM integration
+|   +-- anthropic_adapter.py  # Anthropic API (default)
+|   +-- litellm_adapter.py   # LiteLLM integration (optional)
 |
 +-- persistence/    # Event sourcing and checkpoints
 |   +-- event_store.py # Event storage
@@ -466,10 +467,11 @@ ouroboros run --mcp-config mcp.yaml seed.yaml
                            +----------------+   +----------------+   +----------------+
 ```
 
-### LiteLLM
+### LLM Providers
 
-All LLM calls go through LiteLLM for:
-- Provider abstraction (100+ models)
+LLM calls go through the Anthropic SDK by default (AnthropicAdapter). LiteLLM is available as an optional adapter for multi-provider support:
+- **Anthropic adapter (default)** — direct Anthropic API access
+- **LiteLLM adapter (optional)** — provider abstraction (100+ models)
 - Automatic retries
 - Cost tracking
 - Streaming support

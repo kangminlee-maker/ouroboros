@@ -342,7 +342,7 @@ src/ouroboros/
   evaluation/    # Phase 4: Three-stage evaluation pipeline
   secondary/     # Phase 5: TODO registry
   orchestrator/  # Claude Agent SDK integration
-  providers/     # LLM provider adapters (LiteLLM)
+  providers/     # LLM provider adapters (Anthropic default, LiteLLM optional)
   persistence/   # Event sourcing, checkpoints
   tui/           # Terminal UI (Textual)
   cli/           # CLI commands (Typer)

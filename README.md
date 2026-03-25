@@ -315,7 +315,7 @@ src/ouroboros/
 ├── persistence/    Event sourcing (SQLAlchemy + aiosqlite), checkpoints
 ├── orchestrator/   Claude Agent SDK integration, session management
 ├── core/           Types, errors, seed, ontology, security
-├── providers/      LiteLLM adapter (100+ models)
+├── providers/      Anthropic adapter (default), LiteLLM optional (100+ models)
 ├── mcp/            MCP client/server for Claude Code
 ├── plugin/         Claude Code plugin system
 ├── tui/            Terminal UI dashboard

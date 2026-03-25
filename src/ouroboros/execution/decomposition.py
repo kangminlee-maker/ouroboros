@@ -375,7 +375,7 @@ async def decompose_ac(
     if llm_result.is_err:
         llm_error = ProviderError(
             f"LLM decomposition failed: {llm_result.error}",
-            provider="litellm",
+            provider="anthropic",
         )
         _failed_event = create_ac_decomposition_failed_event(
             ac_id=ac_id,
